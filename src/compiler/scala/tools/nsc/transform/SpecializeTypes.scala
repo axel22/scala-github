@@ -610,7 +610,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
         enterMember(om)
       }
 
-      for (m <- normMembers ; if needsSpecialization(outerEnv ++ env, m) && satisfiable(fullEnv)) {
+      for (m <- normMembers; if needsSpecialization(outerEnv ++ env, m) && satisfiable(fullEnv)) {
         if (!m.isDeferred)
           addConcreteSpecMethod(m)
         // specialized members have to be overridable.
@@ -625,11 +625,12 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
           val NormalizedMember(original) = info(m)
           if (nonConflicting(env ++ typeEnv(m))) {
             if (info(m).degenerate) {
-              debuglog("degenerate normalized member " + m + " info(m): " + info(m))
+              log("degenerate normalized member " + m + " info(m): " + info(m))
+              
               val specMember = enterMember(m.cloneSymbol(cls)).setFlag(SPECIALIZED).resetFlag(DEFERRED)
-
               info(specMember)    = Implementation(original)
               typeEnv(specMember) = env ++ typeEnv(m)
+              
             }
             else debuglog({
               val om = forwardToOverload(m)
@@ -723,6 +724,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
       if (m.isAnonymousClass) List(m) else {
         normalizeMember(m.owner, m, outerEnv) flatMap { normalizedMember =>
           val ms = specializeMember(m.owner, normalizedMember, outerEnv, clazz.info.typeParams)
+          if (clazz.toString.indexOf("Blarg") != -1) log("!!!!!!!" + clazz + " ------> " + normalizedMember + " ------> " + ms)
           // interface traits have concrete members now
           if (ms.nonEmpty && clazz.isTrait && clazz.isInterface)
             clazz.resetFlag(INTERFACE)
@@ -787,11 +789,12 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
           val specMember   = sym.cloneSymbol(owner).setFlag(SPECIALIZED).resetFlag(DEFERRED)
           val env          = mapAnyRefsInSpecSym(env0, sym, specMember)
           val (keys, vals) = env.toList.unzip
-
+          val fullEnv      = outerEnv ++ env
+          
           specMember.name = specializedName(sym, env)
           debuglog("normalizing: " + sym + " to " + specMember + " with params " + tps)
-
-          typeEnv(specMember) = outerEnv ++ env
+          
+          typeEnv(specMember) = fullEnv
           val tps1 = produceTypeParameters(tps, specMember, env)
           tps1 foreach (_ modifyInfo (_.instantiateTypeParams(keys, vals)))
 
@@ -799,7 +802,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
           val methodType = sym.info.resultType.instantiateTypeParams(keys ++ tps, vals ++ tps1.map(_.tpe)).cloneInfo(specMember)
           specMember setInfo polyType(tps1, methodType)
 
-          debuglog("expanded member: " + sym  + ": " + sym.info +
+          log("--------> expanded member: " + sym  + ": " + sym.info +
             " -> " + specMember +
             ": " + specMember.info +
             " env: " + env
@@ -1121,6 +1124,8 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
    */
   def conflicting(env: TypeEnv) = !nonConflicting(env)
   def nonConflicting(env: TypeEnv) = env forall { case (tvar, tpe) =>
+    log(" ---> " + tvar + ", " + tpe + ", " + env)
+    log(" ---> " + subst(env, tvar.info.bounds.lo))
     (subst(env, tvar.info.bounds.lo) <:< tpe) && (tpe <:< subst(env, tvar.info.bounds.hi))
   }
 
@@ -1131,19 +1136,19 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
    *  type variables that are @specialized, (that could become satisfiable).
    */
   def satisfiable(env: TypeEnv): Boolean = satisfiable(env, false)
-  def satisfiable(env: TypeEnv, warnings: Boolean): Boolean = {
+  def satisfiable(env: TypeEnv, errors: Boolean): Boolean = {
     def matches(tpe1: Type, tpe2: Type): Boolean = {
       val t1 = subst(env, tpe1)
       val t2 = subst(env, tpe2)
       ((t1 <:< t2)
         || specializedTypeVars(t1).nonEmpty
         || specializedTypeVars(t2).nonEmpty)
-     }
+    }
 
     env forall { case (tvar, tpe) =>
       matches(tvar.info.bounds.lo, tpe) && matches(tpe, tvar.info.bounds.hi) || {
-        if (warnings)
-          reporter.warning(tvar.pos, "Bounds prevent specialization of " + tvar)
+        if (errors)
+          reporter.error(tvar.pos, "Bounds prevent specialization of " + tvar)
 
         log("specvars: " +
           tvar.info.bounds.lo + ": " +
@@ -1424,14 +1429,39 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
               treeCopy.DefDef(tree1, mods, name, tparams, vparamss, tpt, transform(rhs))
 
             case NormalizedMember(target) =>
-              log("Normalized member: " + symbol + ", target: " + target)
-              if (target.isDeferred || conflicting(typeEnv(symbol))) {
+              log("Normalized member: " + symbol + ", target: " + target + ", " + typeEnv(symbol))
+              if (target.isDeferred/* || conflicting(typeEnv(symbol))*/) {
                 treeCopy.DefDef(
                   tree, mods, name, tparams, vparamss, tpt,
                   localTyper typed gen.mkSysErrorCall("boom! you stepped on a bug. This method should never be called.")
                 )
-              }
-              else {
+              } else if (conflicting(typeEnv(symbol))) {
+                // We specialize the rhs so that values with the conflicting
+                // types are upcast to the specialized type.
+                // An example:
+                //
+                // class Foo[@specialized(Int) T](x: T) {
+                //   def bar[@specialized(Int) W >: T](f: W => Int) = f(x)
+                //   def bar$mIc$sp(f: Int => Int) = f(x.asInstanceOf[Int])
+                // }
+                //
+                // Above, we know that `W = Int` in the normalized method must be a supertype of `T`,
+                // otherwise we couldn't have called the method in the first place.
+                // So, it's safe to cast values of type `T` to `Int`.
+                // Conclusion - in the duplicated body, every expression, whose type is the lower bound
+                // of some type being mapped, should be upcast.
+                val tpenv = typeEnv(symbol)
+                
+                // extract how types on lower bounds should be cast
+                val castmap = tpenv collect {
+                  case (tvar, tpe) if tvar.info.bounds.lo != definitions.NothingClass.tpe => (tvar.info.bounds.lo, tpe)
+                }
+                
+                val tree1 = duplicateBody(ddef, target)
+                debuglog("implementation: " + tree1)
+                val DefDef(mods, name, tparams, vparamss, tpt, rhs) = tree1
+                treeCopy.DefDef(tree1, mods, name, tparams, vparamss, tpt, transform(rhs))
+              } else {
                 // we have an rhs, specialize it
                 val tree1 = duplicateBody(ddef, target)
                 debuglog("implementation: " + tree1)
@@ -1539,7 +1569,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
       val meth   = addBody(tree, source)
 
       val d = new Duplicator
-      log("-->d DUPLICATING: " + meth)
+      log("-->d DUPLICATING: " + meth + " in " + (typeEnv(source) ++ typeEnv(symbol)))
       d.retyped(
         localTyper.context1.asInstanceOf[d.Context],
         meth,

@@ -1,0 +1,4 @@
+si5284.scala:21: error: Bounds prevent specialization of type W
+  def foo[@specialized(Int) W >: T, @specialized(Int) S](f: W => S) = f(a(0))
+                            ^
+one error found
