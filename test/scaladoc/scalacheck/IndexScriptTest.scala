@@ -17,6 +17,7 @@ object Test extends Properties("IndexScript") {
   val docFactory = {
     val settings = new doc.Settings({Console.err.println(_)})
     settings.classpath.value = getClasspath
+    settings.reportModel = false
     val reporter = new scala.tools.nsc.reporters.ConsoleReporter(settings)
     new doc.DocFactory(reporter, settings)
   }

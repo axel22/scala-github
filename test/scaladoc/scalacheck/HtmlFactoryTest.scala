@@ -42,6 +42,8 @@ object Test extends Properties("HtmlFactory") {
   def createFactory = {
     val settings = new Settings({Console.err.println(_)})
     settings.classpath.value = getClasspath
+    settings.reportModel = false
+    settings.nowarn.tryToSetFromPropertyValue("true")
 
     val reporter = new scala.tools.nsc.reporters.ConsoleReporter(settings)
     new DocFactory(reporter, settings)

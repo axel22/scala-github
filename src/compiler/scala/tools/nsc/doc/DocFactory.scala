@@ -94,7 +94,8 @@ class DocFactory(val reporter: Reporter, val settings: doc.Settings) { processor
           println("model contains " + modelFactory.templatesCount + " documentable templates")
         Some(madeModel)
       case None =>
-        println("no documentable class found in compilation units")
+        if (settings.reportModel)
+          println("no documentable class found in compilation units")
         None
     }
 

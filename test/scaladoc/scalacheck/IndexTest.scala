@@ -21,7 +21,8 @@ object Test extends Properties("Index") {
     val settings = new doc.Settings({Console.err.println(_)})
 
     settings.classpath.value = getClasspath
-    println(settings.classpath.value)
+    settings.reportModel = false
+    //println(settings.classpath.value)
 
     val reporter = new scala.tools.nsc.reporters.ConsoleReporter(settings)
 
