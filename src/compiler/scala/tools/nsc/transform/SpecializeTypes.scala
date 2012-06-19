@@ -1198,10 +1198,10 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
     def matches(tpe1: Type, tpe2: Type): Option[TypeEnv] = {
       val t1 = subst(env, tpe1)
       val t2 = subst(env, tpe2)
-      log("---------> " + tpe1 + " matches " + tpe2)
-      log(t1 + ", " + specializedTypeVars(t1))
-      log(t2 + ", " + specializedTypeVars(t2))
-      log("unify: " + unify(t1, t2, env, false, false) + " in " + env)
+      // log("---------> " + tpe1 + " matches " + tpe2)
+      // log(t1 + ", " + specializedTypeVars(t1))
+      // log(t2 + ", " + specializedTypeVars(t2))
+      // log("unify: " + unify(t1, t2, env, false, false) + " in " + env)
       if (t1 <:< t2) noconstraints
       else if (specializedTypeVars(t1).nonEmpty) Some(unify(t1, t2, env, false, false) -- env.keys)
       else if (specializedTypeVars(t2).nonEmpty) Some(unify(t2, t1, env, false, false) -- env.keys)
