@@ -19,6 +19,8 @@ abstract class Duplicators extends Analyzer {
   import global._
   import definitions.{ AnyRefClass, AnyValClass }
 
+  def casts = Map[Symbol, Type]() 
+  
   def retyped(context: Context, tree: Tree): Tree = {
     resetClassOwners
     (new BodyDuplicator(context)).typed(tree)
@@ -359,8 +361,31 @@ abstract class Duplicators extends Analyzer {
           // no need to do anything, in particular, don't set the type to null, EmptyTree.tpe_= asserts
           tree
 
+        case Apply(fun, argtrees) =>
+          // if necessary and allowed by casts map, cast each argument to an appropriate type
+          log("Apply: " + tree)
+          val MethodType(params, restpe) = fun.symbol.info match {
+            case PolyType(_, m) => m
+            case m @ MethodType(_, _) => m
+          }
+          val newargtrees = for ((argtree, param) <- argtrees zip params) yield {
+            argtree.tpe match {
+              case TypeRef(pre, argtreesym, args) =>
+                val castedtree = if (param.info =:= argtreesym.info) argtree
+                                 else if (casts.contains(argtreesym)) gen.mkCast(argtree, casts(argtreesym))
+                                 else argtree // TODO report error
+                castedtree
+              case _ =>
+                argtree
+            }
+          }
+          val applytree = Apply(fun, newargtrees)
+          log(applytree.symbol + ", " + applytree.tpe)
+          super.typed(applytree, mode, pt)
+        
         case _ =>
-          debuglog("Duplicators default case: " + tree.summaryString)
+          log("Duplicators default case: " + tree.summaryString)
+          log(" ---> " + tree)
           if (tree.hasSymbol && tree.symbol != NoSymbol && (tree.symbol.owner == definitions.AnyClass)) {
             tree.symbol = NoSymbol // maybe we can find a more specific member in a subclass of Any (see AnyVal members, like ==)
           }
