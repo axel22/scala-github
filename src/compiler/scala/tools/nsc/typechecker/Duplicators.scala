@@ -369,10 +369,18 @@ abstract class Duplicators extends Analyzer {
             case m @ MethodType(_, _) => m
           }
           val newargtrees = for ((argtree, param) <- argtrees zip params) yield {
+            log("argtree: " + argtree + ": " + argtree.tpe)
+            argtree.tpe = fixType(argtree.tpe)
+            log("Fixed!")
+            log("argtree: " + argtree + ": " + argtree.tpe)
             argtree.tpe match {
               case TypeRef(pre, argtreesym, args) =>
-                val castedtree = if (param.info =:= argtreesym.info) argtree
+                log(argtreesym.tpe)
+                log(param.info)
+                log(casts.get(param.info.typeSymbol))
+                val castedtree = if (argtreesym.tpe =:= param.info) argtree
                                  else if (casts.contains(argtreesym)) gen.mkCast(argtree, casts(argtreesym))
+                                 else if (casts.contains(param.info.typeSymbol) && (casts(param.info.typeSymbol) =:= argtreesym.tpe)) gen.mkCast(argtree, param.info)
                                  else argtree // TODO report error
                 castedtree
               case _ =>
@@ -380,7 +388,7 @@ abstract class Duplicators extends Analyzer {
             }
           }
           val applytree = Apply(fun, newargtrees)
-          log(applytree.symbol + ", " + applytree.tpe)
+          log(applytree + ", " + applytree.symbol + ", " + applytree.tpe)
           super.typed(applytree, mode, pt)
         
         case _ =>
