@@ -325,10 +325,10 @@ abstract class Duplicators extends Analyzer {
           super.typed(atPos(tree.pos)(tree1), mode, pt)
 
         case This(_) =>
-          // log("selection on this, plain: " + tree)
+          log("selection on this, plain: " + tree)
           tree.symbol = updateSym(tree.symbol)
-          tree.tpe = null
-          val tree1 = super.typed(tree, mode, pt)
+          val ntree = castType(tree, pt)
+          val tree1 = super.typed(ntree, mode, pt)
           // log("plain this typed to: " + tree1)
           tree1
 /* no longer needed, because Super now contains a This(...)
@@ -365,50 +365,34 @@ abstract class Duplicators extends Analyzer {
           // no need to do anything, in particular, don't set the type to null, EmptyTree.tpe_= asserts
           tree
         
-        case Apply(fun, argtrees) =>
-          // if necessary and allowed by casts map, cast each argument to an appropriate type
-          log("Apply: " + tree + ", " + fun.getClass)
-          val MethodType(params, _) = fun.symbol.info match {
-            case PolyType(_, m) => m
-            case m @ MethodType(_, _) => m
-          }
-          val newargtrees = for ((argtree, param) <- argtrees zip params) yield {
-            log("argtree: " + argtree + ": " + argtree.tpe)
-            argtree.tpe = fixType(argtree.tpe)
-            log("Fixed! " + argtree.tpe + ", " + argtree.symbol)
-            log("argtree: " + argtree + ": " + argtree.tpe)
-            log("with castmap: " + CastMap(argtree.tpe))
-            argtree.tpe match {
-              case TypeRef(pre, argtreesym, args) =>
-                val castedtree =
-                  if (argtreesym.tpe =:= param.info) argtree
-                  else {
-                    val castargtpe = CastMap(argtreesym.tpe)
-                    log("casted: " + castargtpe + " =:= " + param.info + " -> " + (castargtpe =:= param.info) + ", " + pt)
-                    if (castargtpe =:= param.info) gen.mkCast(argtree, castargtpe)
-                    else if (casts.contains(param.info.typeSymbol) && (casts(param.info.typeSymbol) =:= argtreesym.tpe)) gen.mkCast(argtree, param.info)
-                    else argtree // TODO report error
-                  }
-                log("produced: ---------> " + castedtree)
-                castedtree
-              case _ =>
-                argtree
-            }
-          }
-          val applytree = Apply(fun, newargtrees)
-          log(applytree + ", " + applytree.symbol + ", " + applytree.tpe)
-          super.typed(applytree, mode, pt)
-        
         case _ =>
           log("Duplicators default case: " + tree.summaryString)
           log(" ---> " + tree)
-          if (tree.hasSymbol && tree.symbol != NoSymbol && (tree.symbol.owner == definitions.AnyClass)) {
-            tree.symbol = NoSymbol // maybe we can find a more specific member in a subclass of Any (see AnyVal members, like ==)
-          }
-          tree.tpe = null
-          super.typed(tree, mode, pt)
+          val ntree = castType(tree, pt)
+          super.typed(ntree, mode, pt)
       }
     }
+    
+    def castType(tree: Tree, pt: Type): Tree = {
+      log(" expected type: " + pt)
+      log(" tree type: " + tree.tpe)
+      tree.tpe = if (tree.tpe != null) fixType(tree.tpe) else null
+      log(" tree type: " + tree.tpe)
+      if (tree.hasSymbol && tree.symbol != NoSymbol && (tree.symbol.owner == definitions.AnyClass)) {
+        tree.symbol = NoSymbol // maybe we can find a more specific member in a subclass of Any (see AnyVal members, like ==)
+      }
+      val ntree = if (tree.tpe != null && !(tree.tpe <:< pt)) {
+        val casttpe = CastMap(tree.tpe)
+        log(" cast type: " + casttpe + ", " + (casttpe <:< pt) + ", " + CastMap(pt))
+        if (casttpe <:< pt) gen.mkCast(tree, casttpe)
+        else if (casttpe <:< CastMap(pt)) gen.mkCast(tree, pt)
+        else tree
+      } else tree
+      log("ntree: " + ntree)
+      ntree.tpe = null
+      ntree
+    }
+    
   }
 }
 
