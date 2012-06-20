@@ -28,7 +28,7 @@ abstract class SymbolTable extends makro.Universe
                               with AnnotationInfos
                               with AnnotationCheckers
                               with Trees
-                              with TreePrinters
+                              with Printers
                               with Positions
                               with TypeDebugging
                               with Importers
@@ -40,7 +40,7 @@ abstract class SymbolTable extends makro.Universe
 {
 
   val gen = new TreeGen { val global: SymbolTable.this.type = SymbolTable.this }
-  val treeBuild = gen
+  lazy val treeBuild = gen
 
   def log(msg: => AnyRef): Unit
   def abort(msg: String): Nothing = throw new FatalError(supplementErrorMessage(msg))

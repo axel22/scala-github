@@ -1501,20 +1501,29 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
 
         case ddef @ DefDef(_, _, _, vparamss, _, _) if info.isDefinedAt(symbol) =>
           // log("--> method: " + ddef + " in " + ddef.symbol.owner + ", " + info(symbol))
+          def reportTypeError(body: =>Tree) =
+            try body
+            catch {
+              case te: TypeError =>
+                reporter.error(te.pos, te.toString)
+                ddef
+            }
           if (symbol.isConstructor) {
 
             val t = atOwner(symbol)(forwardCtorCall(tree.pos, gen.mkSuperSelect, vparamss, symbol.owner))
 
             if (symbol.isPrimaryConstructor)
               localTyper.typedPos(symbol.pos)(deriveDefDef(tree)(_ => Block(List(t), Literal(Constant()))))
-            else  // duplicate the original constructor
-              duplicateBody(ddef, info(symbol).target)
+            else // duplicate the original constructor
+              reportTypeError(duplicateBody(ddef, info(symbol).target))
           }
           else info(symbol) match {
             case Implementation(target) =>
               assert(body.isDefinedAt(target), "sym: " + symbol.fullName + " target: " + target.fullName)
               // we have an rhs, specialize it
-              val tree1 = duplicateBody(ddef, target)
+              val tree1 = reportTypeError {
+                duplicateBody(ddef, target)
+              }
               debuglog("implementation: " + tree1)
               deriveDefDef(tree1)(transform)
 
@@ -1525,8 +1534,9 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
                 deriveDefDef(tree)(_ => localTyper typed gen.mkSysErrorCall("Fatal error in code generation: this should never be called."))
               } else {
                 // we have an rhs, specialize it
-                // TODO - insert proper casts into the body of the method
-                val tree1 = duplicateBody(ddef, target, constraints.get)
+                val tree1 = reportTypeError {
+                  duplicateBody(ddef, target, constraints.get)
+                }
                 debuglog("implementation: " + tree1)
                 deriveDefDef(tree1)(transform)
               }
