@@ -1,27 +1,27 @@
-sealed abstract class MyList[@specialized +A] {
+sealed abstract class MyList[@specialized(Int) +A] {
   def head: A
   def tail: MyList[A]
 
-  def ::[@specialized B >: A](x: B): MyList[B] = 
+  def ::[@specialized(Int) B >: A](x: B): MyList[B] = 
     new Cons[B](x, this)
 }
 
-case object MyNil extends MyList[Nothing] {
-  def head = error("nil")
-  def tail = error("nil")
-}
+// case object MyNil extends MyList[Nothing] {
+//   def head = error("nil")
+//   def tail = error("nil")
+// }
 
-case class Cons[@specialized a](private val hd: a, tl: MyList[a]) extends MyList[a] {
+case class Cons[@specialized(Int) T](private val hd: T, tl: MyList[T]) extends MyList[T] {
   def head = hd
   def tail = tl
 }
 
-abstract class IntList extends MyList[Int]
+// abstract class IntList extends MyList[Int]
 
-object Main extends App {
-  val xs = 1 :: 2 :: 3 :: MyNil 
-  println(xs)
-}
+// object Main extends App {
+//   val xs = 1 :: 2 :: 3 :: MyNil 
+//   println(xs)
+// }
 
 /*
 final class ConsI(hd1: Int, tl1: MyList[Int]) extends Cons[Int](hd1, tl1) {

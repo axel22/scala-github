@@ -19,8 +19,6 @@ abstract class Duplicators extends Analyzer {
   import global._
   import definitions.{ AnyRefClass, AnyValClass }
 
-  def casts = Map[Symbol, Type]() 
-  
   def retyped(context: Context, tree: Tree): Tree = {
     resetClassOwners
     (new BodyDuplicator(context)).typed(tree)
@@ -64,6 +62,12 @@ abstract class Duplicators extends Analyzer {
       else sym1 eq sym2
   }
 
+  def casts = Map[Symbol, Type]()
+  
+  private val (castfrom, castto) = casts.unzip
+  
+  private object CastMap extends SubstTypeMap(castfrom.toList, castto.toList)
+  
   private val invalidSyms: mutable.Map[Symbol, Tree] = perRunCaches.newMap[Symbol, Tree]()
 
   /** A typer that creates new symbols for all definitions in the given tree
@@ -360,28 +364,32 @@ abstract class Duplicators extends Analyzer {
         case EmptyTree =>
           // no need to do anything, in particular, don't set the type to null, EmptyTree.tpe_= asserts
           tree
-
+        
         case Apply(fun, argtrees) =>
           // if necessary and allowed by casts map, cast each argument to an appropriate type
-          log("Apply: " + tree)
-          val MethodType(params, restpe) = fun.symbol.info match {
+          log("Apply: " + tree + ", " + fun.getClass)
+          val MethodType(params, _) = fun.symbol.info match {
             case PolyType(_, m) => m
             case m @ MethodType(_, _) => m
           }
           val newargtrees = for ((argtree, param) <- argtrees zip params) yield {
             log("argtree: " + argtree + ": " + argtree.tpe)
             argtree.tpe = fixType(argtree.tpe)
-            log("Fixed!")
+            log("Fixed! " + argtree.tpe + ", " + argtree.symbol)
             log("argtree: " + argtree + ": " + argtree.tpe)
+            log("with castmap: " + CastMap(argtree.tpe))
             argtree.tpe match {
               case TypeRef(pre, argtreesym, args) =>
-                log(argtreesym.tpe)
-                log(param.info)
-                log(casts.get(param.info.typeSymbol))
-                val castedtree = if (argtreesym.tpe =:= param.info) argtree
-                                 else if (casts.contains(argtreesym)) gen.mkCast(argtree, casts(argtreesym))
-                                 else if (casts.contains(param.info.typeSymbol) && (casts(param.info.typeSymbol) =:= argtreesym.tpe)) gen.mkCast(argtree, param.info)
-                                 else argtree // TODO report error
+                val castedtree =
+                  if (argtreesym.tpe =:= param.info) argtree
+                  else {
+                    val castargtpe = CastMap(argtreesym.tpe)
+                    log("casted: " + castargtpe + " =:= " + param.info + " -> " + (castargtpe =:= param.info) + ", " + pt)
+                    if (castargtpe =:= param.info) gen.mkCast(argtree, castargtpe)
+                    else if (casts.contains(param.info.typeSymbol) && (casts(param.info.typeSymbol) =:= argtreesym.tpe)) gen.mkCast(argtree, param.info)
+                    else argtree // TODO report error
+                  }
+                log("produced: ---------> " + castedtree)
                 castedtree
               case _ =>
                 argtree
