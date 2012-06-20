@@ -450,7 +450,11 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
 
   /** Type parameters that survive when specializing in the specified environment. */
   def survivingParams(params: List[Symbol], env: TypeEnv) =
-    params.filter(p => !p.isSpecialized || !isPrimitiveValueType(env(p)))
+    params filter {
+      p =>
+      !p.isSpecialized || 
+      env.contains(p) && !isPrimitiveValueType(env(p))
+    }
 
   /** Produces the symbols from type parameters `syms` of the original owner,
    *  in the given type environment `env`. The new owner is `nowner`.
