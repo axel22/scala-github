@@ -803,6 +803,8 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
           specializingOn = specializingOn filterNot (unusedStvars contains)
         }
         for (env0 <- specializations(specializingOn) if needsSpecialization(env0, sym)) yield {
+          log("env0: " + env0)
+          log("specOn: " + specializingOn)
           val tps          = survivingParams(sym.info.typeParams, env0)
           val specMember   = sym.cloneSymbol(owner, (sym.flags | SPECIALIZED) & ~DEFERRED)
           val env          = mapAnyRefsInSpecSym(env0, sym, specMember)
@@ -813,6 +815,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
           //   if (tps.isEmpty) "" else " with params " + tps.mkString(", ")))
 
           typeEnv(specMember) = outerEnv ++ env
+          log("entering: " + specMember + ", with: " + typeEnv(specMember))
           val tps1 = produceTypeParameters(tps, specMember, env)
           tps1 foreach (_ modifyInfo (_.instantiateTypeParams(keys, vals)))
 
@@ -1294,6 +1297,10 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
           if (concreteSpecMethods(tree.symbol) || tree.symbol.isConstructor) {
             // debuglog("!!! adding body of a defdef %s, symbol %s: %s".format(tree, tree.symbol, rhs))
             body(tree.symbol) = rhs
+            rhs match {
+              case Apply(fun, args) => log("!! collecting " + tree.symbol + " : " + args + ": " + args.map(_.tpe))
+              case _ =>
+            }
             //          body(tree.symbol) = tree // whole method
             parameters(tree.symbol) = vparams.map(_.symbol)
             concreteSpecMethods -= tree.symbol
@@ -1305,6 +1312,43 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
           //super.traverse(tree)
         case _ =>
           super.traverse(tree)
+      }
+    }
+    
+    /** Casts the expressions of a particular type parameter in the tree */
+    class CastExpressions(env: TypeEnv, casts: TypeEnv) extends Transformer {
+      override def transform(tree: Tree): Tree = tree match {
+        case Apply(fun, argtrees) =>
+          // if necessary and allowed by casts map, cast each argument to an appropriate type
+          log("Apply: " + tree)
+          val MethodType(params, restpe) = fun.symbol.info match {
+            case PolyType(_, m) => m
+            case m @ MethodType(_, _) => m
+          }
+          val newargtrees = for ((argtree, param) <- argtrees zip params) yield {
+            log("argtree: " + argtree + ": " + argtree.tpe)
+            argtree.tpe = subst(env, argtree.tpe)
+            log("Substituted with " + env + ", " + env.map(_._1.tpe))
+            log("argtree: " + argtree + ": " + argtree.tpe)
+            argtree.tpe match {
+              case TypeRef(pre, argtreesym, args) =>
+                log(argtreesym.tpe + ", " + argtreesym.tpe.typeSymbol)
+                log(param.info)
+                log(casts.get(param.info.typeSymbol))
+                val castedtree = if (argtreesym.tpe =:= param.info) argtree
+                                 else if (casts.contains(argtreesym)) gen.mkCast(argtree, casts(argtreesym))
+                                 else if (casts.contains(param.info.typeSymbol) && (casts(param.info.typeSymbol) =:= argtreesym.tpe)) gen.mkCast(argtree, param.info)
+                                 else argtree // TODO report error
+                castedtree
+              case _ =>
+                argtree
+            }
+          }
+          val applytree = Apply(fun, newargtrees)
+          log(applytree + ", " + applytree.symbol + ", " + applytree.tpe)
+          super.transform(applytree)
+        case _ =>
+          super.transform(tree)
       }
     }
 
@@ -1508,7 +1552,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
                 deriveDefDef(tree)(_ => localTyper typed gen.mkSysErrorCall("Fatal error in code generation: this should never be called."))
               } else {
                 // we have an rhs, specialize it
-                // TODO - insert proper casts into the body of the method
+                // and insert proper casts into the body of the method
                 val tree1 = duplicateBody(ddef, target, constraints.get)
                 debuglog("implementation: " + tree1)
                 deriveDefDef(tree1)(transform)
@@ -1604,20 +1648,19 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
      *  this method will insert casts for all the expressions of types mappend in the
      *  `castmap`.
      */
-    private def duplicateBody(tree: DefDef, source: Symbol, castmap: TypeEnv = emptyEnv) = {
-      val symbol = tree.symbol
+    private def duplicateBody(tree: DefDef, source: Symbol, castmap: TypeEnv = emptyEnv) = {val symbol = tree.symbol
       val meth   = addBody(tree, source)
-
-      val d = new Duplicator {
-        override def casts = castmap
-      }
+      
+      val env = typeEnv(source) ++ typeEnv(symbol)
+      val c = new CastExpressions(env, castmap)
+      val d = new Duplicator
       debuglog("-->d DUPLICATING: " + meth)
       d.retyped(
         localTyper.context1.asInstanceOf[d.Context],
-        meth,
+        c.transform(meth),
         source.enclClass,
         symbol.enclClass,
-        typeEnv(source) ++ typeEnv(symbol)
+        env
       )
     }
 
