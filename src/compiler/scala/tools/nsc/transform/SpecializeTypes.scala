@@ -1217,9 +1217,33 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
     }
   }
 
-  class Duplicator extends {
+  /** This duplicator additionally performs casts of expressions if that is allowed by the `casts` map. */
+  class Duplicator(casts: Map[Symbol, Type]) extends {
     val global: SpecializeTypes.this.global.type = SpecializeTypes.this.global
-  } with typechecker.Duplicators
+  } with typechecker.Duplicators {
+    private val (castfrom, castto) = casts.unzip
+    private object CastMap extends SubstTypeMap(castfrom.toList, castto.toList)
+    
+    class BodyDuplicator(_context: Context) extends super.BodyDuplicator(_context) {
+      override def castType(tree: Tree, pt: Type): Tree = {
+        // log(" expected type: " + pt)
+        // log(" tree type: " + tree.tpe)
+        tree.tpe = if (tree.tpe != null) fixType(tree.tpe) else null
+        // log(" tree type: " + tree.tpe)
+        val ntree = if (tree.tpe != null && !(tree.tpe <:< pt)) {
+          val casttpe = CastMap(tree.tpe)
+          if (casttpe <:< pt) gen.mkCast(tree, casttpe)
+          else if (casttpe <:< CastMap(pt)) gen.mkCast(tree, pt)
+          else tree
+        } else tree
+        ntree.tpe = null
+        ntree
+      }
+    }
+    
+    protected override def newBodyDuplicator(context: Context) = new BodyDuplicator(context)
+    
+  }
 
   /** A tree symbol substituter that substitutes on type skolems.
    *  If a type parameter is a skolem, it looks for the original
@@ -1490,18 +1514,6 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
               deriveDefDef(tree1)(transform)
 
             case NormalizedMember(target) =>
-              log("Normalized member: " + symbol + ", target: " + target)
-              log(" ---> t.e.: " + typeEnv(symbol) + ", confl.: " + conflicting(typeEnv(symbol)))
-              log(" ---> t.e.: " + typeEnv(symbol) + ", satis.: " + satisfiable(typeEnv(symbol)))
-              typeEnv(symbol) forall {
-                case (tvar, tpe) =>
-                  log(tvar)
-                  log("tpe: " + tpe)
-                  log("bounds: " + tvar.info.bounds)
-                  log("lo subst: " + subst(typeEnv(symbol), tvar.info.bounds.lo))
-                  log("hi subst: " + subst(typeEnv(symbol), tvar.info.bounds.hi))
-                  true
-              }
               val constraints = satisfiabilityConstraints(typeEnv(symbol))
               log("constraints: " + constraints)
               if (target.isDeferred || constraints == None) {
@@ -1572,7 +1584,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
           val tree1 = deriveValDef(tree)(_ => body(symbol.alias).duplicate)
           debuglog("now typing: " + tree1 + " in " + tree.symbol.owner.fullName)
 
-          val d = new Duplicator
+          val d = new Duplicator(emptyEnv)
           val newValDef = d.retyped(
             localTyper.context1.asInstanceOf[d.Context],
             tree1,
@@ -1608,9 +1620,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
       val symbol = tree.symbol
       val meth   = addBody(tree, source)
 
-      val d = new Duplicator {
-        override def casts = castmap
-      }
+      val d = new Duplicator(castmap)
       debuglog("-->d DUPLICATING: " + meth)
       d.retyped(
         localTyper.context1.asInstanceOf[d.Context],

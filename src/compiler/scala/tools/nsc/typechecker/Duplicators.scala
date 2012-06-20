@@ -21,7 +21,7 @@ abstract class Duplicators extends Analyzer {
 
   def retyped(context: Context, tree: Tree): Tree = {
     resetClassOwners
-    (new BodyDuplicator(context)).typed(tree)
+    (newBodyDuplicator(context)).typed(tree)
   }
 
   /** Retype the given tree in the given context. Use this method when retyping
@@ -37,15 +37,17 @@ abstract class Duplicators extends Analyzer {
 
     envSubstitution = new SubstSkolemsTypeMap(env.keysIterator.toList, env.valuesIterator.toList)
     debuglog("retyped with env: " + env)
-    (new BodyDuplicator(context)).typed(tree)
+    newBodyDuplicator(context).typed(tree)
   }
 
+  protected def newBodyDuplicator(context: Context) = new BodyDuplicator(context)
+  
   def retypedMethod(context: Context, tree: Tree, oldThis: Symbol, newThis: Symbol): Tree =
-    (new BodyDuplicator(context)).retypedMethod(tree.asInstanceOf[DefDef], oldThis, newThis)
+    (newBodyDuplicator(context)).retypedMethod(tree.asInstanceOf[DefDef], oldThis, newThis)
 
   /** Return the special typer for duplicate method bodies. */
   override def newTyper(context: Context): Typer =
-    new BodyDuplicator(context)
+    newBodyDuplicator(context)
 
   private def resetClassOwners() {
     oldClassOwner = null
@@ -62,12 +64,6 @@ abstract class Duplicators extends Analyzer {
       else sym1 eq sym2
   }
 
-  def casts = Map[Symbol, Type]()
-  
-  private val (castfrom, castto) = casts.unzip
-  
-  private object CastMap extends SubstTypeMap(castfrom.toList, castto.toList)
-  
   private val invalidSyms: mutable.Map[Symbol, Tree] = perRunCaches.newMap[Symbol, Tree]()
 
   /** A typer that creates new symbols for all definitions in the given tree
@@ -215,6 +211,11 @@ abstract class Duplicators extends Analyzer {
       }
     }
 
+    /** Optionally cast this tree into some other type, if required.
+     *  Unless overridden, just returns the tree.
+     */
+    def castType(tree: Tree, pt: Type): Tree = tree
+    
     /** Special typer method for re-type checking trees. It expects a typed tree.
      *  Returns a typed tree that has fresh symbols for all definitions in the original tree.
      *
@@ -325,7 +326,7 @@ abstract class Duplicators extends Analyzer {
           super.typed(atPos(tree.pos)(tree1), mode, pt)
 
         case This(_) =>
-          log("selection on this, plain: " + tree)
+          debuglog("selection on this, plain: " + tree)
           tree.symbol = updateSym(tree.symbol)
           val ntree = castType(tree, pt)
           val tree1 = super.typed(ntree, mode, pt)
@@ -366,31 +367,14 @@ abstract class Duplicators extends Analyzer {
           tree
         
         case _ =>
-          log("Duplicators default case: " + tree.summaryString)
-          log(" ---> " + tree)
+          debuglog("Duplicators default case: " + tree.summaryString)
+          debuglog(" ---> " + tree)
+          if (tree.hasSymbol && tree.symbol != NoSymbol && (tree.symbol.owner == definitions.AnyClass)) {
+            tree.symbol = NoSymbol // maybe we can find a more specific member in a subclass of Any (see AnyVal members, like ==)
+          }
           val ntree = castType(tree, pt)
           super.typed(ntree, mode, pt)
       }
-    }
-    
-    def castType(tree: Tree, pt: Type): Tree = {
-      log(" expected type: " + pt)
-      log(" tree type: " + tree.tpe)
-      tree.tpe = if (tree.tpe != null) fixType(tree.tpe) else null
-      log(" tree type: " + tree.tpe)
-      if (tree.hasSymbol && tree.symbol != NoSymbol && (tree.symbol.owner == definitions.AnyClass)) {
-        tree.symbol = NoSymbol // maybe we can find a more specific member in a subclass of Any (see AnyVal members, like ==)
-      }
-      val ntree = if (tree.tpe != null && !(tree.tpe <:< pt)) {
-        val casttpe = CastMap(tree.tpe)
-        log(" cast type: " + casttpe + ", " + (casttpe <:< pt) + ", " + CastMap(pt))
-        if (casttpe <:< pt) gen.mkCast(tree, casttpe)
-        else if (casttpe <:< CastMap(pt)) gen.mkCast(tree, pt)
-        else tree
-      } else tree
-      log("ntree: " + ntree)
-      ntree.tpe = null
-      ntree
     }
     
   }
