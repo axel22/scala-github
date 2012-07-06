@@ -160,11 +160,19 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
      *  to a type for which `sym` is specialized.
      */
     def isValid(env: TypeEnv, sym: Symbol): Boolean = {
-      env forall { case (tvar, tpe) =>
-        tvar.isSpecialized && (concreteTypes(tvar) contains tpe) && {
-          (sym.typeParams contains tvar) ||
-          (sym.owner != RootClass && (sym.owner.typeParams contains tvar))
-        }
+      env forall {
+        case (tvar, tpe) =>
+          val isSpecialized = tvar.isSpecialized
+          val specializedOn = concreteTypes(tvar)
+          val isViable = (specializedOn contains tpe) || {
+            specializedOn.contains(AnyRefClass.tpe) && (tpe <:< AnyRefClass.tpe)
+          }
+          log("is viable " + sym.fullName + ", " + tvar + " -> " + tpe + ": " + isViable)
+          val includedInTParams = {
+            (sym.typeParams contains tvar) ||
+            (sym.owner != RootClass && (sym.owner.typeParams contains tvar))
+          }
+        isSpecialized && isViable && includedInTParams
       }
     }
   }
@@ -346,6 +354,8 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
       Nil // no @specialized Annotation
     else
       specializedOn(sym) map (s => specializesClass(s).tpe) sorted
+    
+    log("concrete types: " + types)
 
     if (isBoundedGeneric(sym.tpe) && (types contains AnyRefClass))
       reporter.warning(sym.pos, sym + " is always a subtype of " + AnyRefClass.tpe + ".")
@@ -930,9 +940,16 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
           }
         }
       }
+      if (!overriding.fullName.contains("scala")) {
+        log("-----------------> " + overriding.fullName)
+        log(overriding.allOverriddenSymbols)
+      }
       if (!overriding.isParamAccessor) {
         for (overridden <- overriding.allOverriddenSymbols) {
           val stvars = specializedTypeVars(overridden.info)
+          if (!overriding.fullName.contains("scala")) {
+            log("stvars: " + overridden + " -> " + stvars)
+          }
           if (stvars.nonEmpty) {
             debuglog("specialized override of %s by %s%s".format(overridden.fullLocationString, overriding.fullLocationString,
               if (stvars.isEmpty) "" else stvars.map(_.name).mkString("(", ", ", ")")))
@@ -942,9 +959,12 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
 
             val env    = unify(overridden.info, overriding.info, emptyEnv, false, true)
             def atNext = afterSpecialize(overridden.owner.info.decl(specializedName(overridden, env)))
+            log("unification(" + overridden.info + ", " + overriding.info + "): " + env)
+            log("restricted: " + TypeEnv.restrict(env, stvars).nonEmpty)
+            log("is valid: " + TypeEnv.isValid(env, overridden))
 
             if (TypeEnv.restrict(env, stvars).nonEmpty && TypeEnv.isValid(env, overridden) && atNext != NoSymbol) {
-              debuglog("  " + pp(env) + " found " + atNext)
+              log("  " + pp(env) + " found " + atNext)
               return (overridden, env)
             }
           }
@@ -957,12 +977,12 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
         case (NoSymbol, _)     => None
         case (overridden, env) =>
           val om = specializedOverload(clazz, overridden, env)
-          debuglog("specialized overload %s for %s in %s: %s".format(om, overriding.name.decode, pp(env), om.info))
+          log("specialized overload %s for %s in %s: %s".format(om, overriding.name.decode, pp(env), om.info))
           typeEnv(om) = env
           addConcreteSpecMethod(overriding)
           info(om) = (
             if (overriding.isDeferred) {    // abstract override
-              debuglog("abstract override " + overriding.fullName + " with specialized " + om.fullName)
+              log("abstract override " + overriding.fullName + " with specialized " + om.fullName)
               Forward(overriding)
             }
             else {
