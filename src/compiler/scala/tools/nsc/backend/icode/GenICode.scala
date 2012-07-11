@@ -910,6 +910,7 @@ abstract class GenICode extends SubComponent  {
              */
             fun match {
               case Select(qual, _) =>
+                log("failing here: " + fun)
                 val qualSym = qual.tpe.typeSymbol
                 if (qualSym == ArrayClass) cm setTargetTypeKind toTypeKind(qual.tpe)
                 else cm setHostClass qualSym

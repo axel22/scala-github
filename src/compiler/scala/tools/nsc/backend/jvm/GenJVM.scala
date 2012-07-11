@@ -1056,6 +1056,7 @@ abstract class GenJVM extends SubComponent with GenJVMUtil with GenAndroid with 
       clinit.emitRETURN()
     }
 
+    /** Add a static field in the companion class corresponding to the accessed field in the companion object. */
     /** Add a forwarder for method m */
     def addForwarder(jclass: JClass, module: Symbol, m: Symbol) {
       val moduleName     = javaName(module)
@@ -1121,7 +1122,11 @@ abstract class GenJVM extends SubComponent with GenJVMUtil with GenAndroid with 
         linkedClass.info.members collect { case sym if sym.name.isTermName => sym.name } toSet
       }
       debuglog("Potentially conflicting names for forwarders: " + conflictingNames)
+      
+      def isStaticMember(m: Symbol) = m.hasAnnotation(definitions.StaticClass)
 
+      log("companion object: " + moduleClass + " (should be the same as " + linkedModule + ")")
+      log("companion class: " + linkedClass)
       for (m <- moduleClass.info.membersBasedOnFlags(ExcludedForwarderFlags, Flags.METHOD)) {
         if (m.isType || m.isDeferred || (m.owner eq ObjectClass) || m.isConstructor)
           debuglog("No forwarder for '%s' from %s to '%s'".format(m, className, moduleClass))
@@ -1129,7 +1134,11 @@ abstract class GenJVM extends SubComponent with GenJVMUtil with GenAndroid with 
           log("No forwarder for " + m + " due to conflict with " + linkedClass.info.member(m.name))
         else {
           log("Adding static forwarder for '%s' from %s to '%s'".format(m, className, moduleClass))
-          addForwarder(jclass, moduleClass, m)
+          if (m.isAccessor && isStaticMember(m.accessed)) {
+            log("@static: accessor " + m + ", accessed: " + m.accessed)
+          } else if (isStaticMember(m)) {
+            log("@static: static method " + m)
+          } else addForwarder(jclass, moduleClass, m)
         }
       }
     }

@@ -26,6 +26,7 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
     private val newStaticMembers      = mutable.Buffer.empty[Tree]
     private val newStaticInits        = mutable.Buffer.empty[Tree]
     private val symbolsStoredAsStatic = mutable.Map.empty[String, Symbol]
+    private val staticBodies          = mutable.Map.empty[(Symbol, Symbol), Tree]
     private def clearStatics() {
       newStaticMembers.clear()
       newStaticInits.clear()
@@ -45,15 +46,46 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
       result
     }
     private def transformTemplate(tree: Tree) = {
-      val Template(parents, self, body) = tree
+      val t @ Template(parents, self, body) = tree
       clearStatics()
+      
+      addStaticDeclarations(t)
+      
       val newBody = transformTrees(body)
       val templ   = deriveTemplate(tree)(_ => transformTrees(newStaticMembers.toList) ::: newBody)
       try addStaticInits(templ) // postprocess to include static ctors
       finally clearStatics()
     }
     private def mkTerm(prefix: String): TermName = unit.freshTermName(prefix)
-
+    
+    private def addStaticDeclarations(tree: Template) {
+      log("cleanup template: " + currentClass)
+      
+      if (!currentClass.isModuleClass) for {
+        staticSym <- currentClass.info.decls
+        if staticSym.hasAnnotation(StaticClass)
+      } staticSym match {
+        case stfieldSym if stfieldSym.isVariable =>
+          log("found field with @static: " + stfieldSym)
+          
+          val rhs = staticBodies((currentClass, stfieldSym))
+          val stfieldDef  = localTyper.typedPos(tree.pos)(VAL(stfieldSym) === rhs)
+          val stfieldInit = localTyper.typedPos(tree.pos)(safeREF(stfieldSym) === rhs)
+          
+          // add field definition to new defs
+          newStaticMembers append stfieldDef
+          newStaticInits append stfieldInit
+        case stmethSym if stmethSym.isMethod =>
+          log("found field with @static: " + stmethSym)
+          
+          val rhs = staticBodies((currentClass, stmethSym))
+          val stmethDef  = localTyper.typedPos(tree.pos)(DEF(stmethSym) === rhs)
+          
+          // add method definition to new defs
+          newStaticMembers append stmethDef
+      }
+    }
+    
     /** Kludge to provide a safe fix for #4560:
      *  If we generate a reference in an implementation class, we
      *  watch out for embedded This(..) nodes that point to the interface.
@@ -555,7 +587,48 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
 
           else tree
         }
-
+      
+      case DefDef(mods, name, tparams, vparamss, tpt, rhs) if tree.symbol.hasAnnotation(StaticClass) =>
+        log("--> cleanup static defdef: " + name)
+        val sym = tree.symbol
+        val owner = sym.owner
+        
+        if (owner.isModuleClass) {
+          val linkedClass = owner.companionClass
+          log("companion: " + linkedClass + ", " + linkedClass.fullName + " -> @static val " + name)
+          
+          val stmethSym = linkedClass.newMethod(newTermName(name.toTermName), tree.pos, STATIC | SYNTHETIC | FINAL)
+          stmethSym setInfo sym.info
+          stmethSym.addAnnotation(StaticClass)
+          
+          linkedClass.info.decls enter stmethSym
+          staticBodies((linkedClass, stmethSym)) = rhs
+          
+          // generate a forwarder to the static method in `Foo`
+          val forwtree = Apply(Select(This(linkedClass), stmethSym), vparamss(0))
+          val ntree = localTyper.typedPos(tree.pos)(DefDef(sym, forwtree))
+          
+          super.transform(ntree)
+        } else super.transform(tree)
+      
+      case ValDef(mods, name, tpt, rhs) if tree.symbol.hasAnnotation(StaticClass) =>
+        log("--> cleanup static valdef: " + name)
+        val sym = tree.symbol
+        val owner = sym.owner
+        
+        if (owner.isModuleClass) {
+          val linkedClass = owner.companionClass
+          log("companion: " + linkedClass + ", " + linkedClass.fullName + " -> @static val " + name)
+          
+          val stfieldSym = linkedClass.newVariable(newTermName(name), tree.pos, STATIC | SYNTHETIC | FINAL) setInfo sym.tpe
+          stfieldSym.addAnnotation(StaticClass)
+          
+          linkedClass.info.decls enter stfieldSym
+          staticBodies((linkedClass, stfieldSym)) = Select(This(owner), sym)
+        }
+        
+        super.transform(tree)
+        
       /* MSIL requires that the stack is empty at the end of a try-block.
        * Hence, we here rewrite all try blocks with a result != {Unit, All} such that they
        * store their result in a local variable. The catch blocks are adjusted as well.

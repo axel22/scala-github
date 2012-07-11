@@ -1206,7 +1206,7 @@ abstract class GenASM extends SubComponent with BytecodeWriters {
         linkedClass.info.members collect { case sym if sym.name.isTermName => sym.name } toSet
       }
       debuglog("Potentially conflicting names for forwarders: " + conflictingNames)
-
+      
       for (m <- moduleClass.info.membersBasedOnFlags(ExcludedForwarderFlags, Flags.METHOD)) {
         if (m.isType || m.isDeferred || (m.owner eq ObjectClass) || m.isConstructor)
           debuglog("No forwarder for '%s' from %s to '%s'".format(m, jclassName, moduleClass))
