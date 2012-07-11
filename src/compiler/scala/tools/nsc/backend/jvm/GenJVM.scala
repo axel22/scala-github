@@ -935,15 +935,30 @@ abstract class GenJVM extends SubComponent with GenJVMUtil with GenAndroid with 
             jcode.emitSTORE(indexOf(_this), javaType(_this.kind))
           }
         }
+        
+        if (m.symbol.hasAnnotation(StaticClass) && m.symbol.owner.isModuleClass) {
+          var i = 0
+          var index = 0
+          var argTypes = jmethod.getArgumentTypes()
+          while (i < argTypes.length) {
+            jcode.emitLOAD(index, argTypes(i))
+            index += argTypes(i).getSize()
+            i += 1
+          }
 
-        for (local <- m.locals if ! m.params.contains(local)) {
-          debuglog("add local var: " + local)
-          jmethod.addNewLocalVariable(javaType(local.kind), javaName(local.sym))
+          val companionName = javaName(m.symbol.owner.companionClass)
+          jcode.emitINVOKESTATIC(companionName, jmethod.getName, javaType(m.symbol).asInstanceOf[JMethodType])
+          jcode emitRETURN jmethod.getReturnType()
+        } else {
+          for (local <- m.locals if ! m.params.contains(local)) {
+            debuglog("add local var: " + local)
+            jmethod.addNewLocalVariable(javaType(local.kind), javaName(local.sym))
+          }
+
+          genCode(m)
+          if (emitVars)
+            genLocalVariableTable(m, jcode)
         }
-
-        genCode(m)
-        if (emitVars)
-          genLocalVariableTable(m, jcode)
       }
 
       addGenericSignature(jmethod, m.symbol, clasz.symbol)
@@ -1056,7 +1071,6 @@ abstract class GenJVM extends SubComponent with GenJVMUtil with GenAndroid with 
       clinit.emitRETURN()
     }
 
-    /** Add a static field in the companion class corresponding to the accessed field in the companion object. */
     /** Add a forwarder for method m */
     def addForwarder(jclass: JClass, module: Symbol, m: Symbol) {
       val moduleName     = javaName(module)
@@ -1130,15 +1144,15 @@ abstract class GenJVM extends SubComponent with GenJVMUtil with GenAndroid with 
       for (m <- moduleClass.info.membersBasedOnFlags(ExcludedForwarderFlags, Flags.METHOD)) {
         if (m.isType || m.isDeferred || (m.owner eq ObjectClass) || m.isConstructor)
           debuglog("No forwarder for '%s' from %s to '%s'".format(m, className, moduleClass))
-        else if (conflictingNames(m.name))
+        else if (m.isAccessor && isStaticMember(m.accessed)) {
+          log("@static - accessor: " + m + ", accessed: " + m.accessed)
+        } else if (isStaticMember(m)) {
+          log("@static - already generated a forwarder from the companion object method to the static method in the class: " + m)
+        } else if (conflictingNames(m.name))
           log("No forwarder for " + m + " due to conflict with " + linkedClass.info.member(m.name))
         else {
           log("Adding static forwarder for '%s' from %s to '%s'".format(m, className, moduleClass))
-          if (m.isAccessor && isStaticMember(m.accessed)) {
-            log("@static: accessor " + m + ", accessed: " + m.accessed)
-          } else if (isStaticMember(m)) {
-            log("@static: static method " + m)
-          } else addForwarder(jclass, moduleClass, m)
+          addForwarder(jclass, moduleClass, m)
         }
       }
     }

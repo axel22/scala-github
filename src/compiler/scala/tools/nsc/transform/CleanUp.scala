@@ -79,7 +79,11 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
           log("found field with @static: " + stmethSym)
           
           val rhs = staticBodies((currentClass, stmethSym))
-          val stmethDef  = localTyper.typedPos(tree.pos)(DEF(stmethSym) === rhs)
+          val defdef = copyDefDef(DefDef(stmethSym, rhs))()
+          log("copied: " + defdef)
+          
+          //val stmethDef  = localTyper.typedPos(tree.pos)(defdef)
+          val stmethDef = duplicateBody(defdef,
           
           // add method definition to new defs
           newStaticMembers append stmethDef
@@ -602,14 +606,11 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
           stmethSym.addAnnotation(StaticClass)
           
           linkedClass.info.decls enter stmethSym
+          
           staticBodies((linkedClass, stmethSym)) = rhs
-          
-          // generate a forwarder to the static method in `Foo`
-          val forwtree = Apply(Select(This(linkedClass), stmethSym), vparamss(0))
-          val ntree = localTyper.typedPos(tree.pos)(DefDef(sym, forwtree))
-          
-          super.transform(ntree)
-        } else super.transform(tree)
+        }
+        
+        super.transform(tree)
       
       case ValDef(mods, name, tpt, rhs) if tree.symbol.hasAnnotation(StaticClass) =>
         log("--> cleanup static valdef: " + name)

@@ -1210,7 +1210,11 @@ abstract class GenASM extends SubComponent with BytecodeWriters {
       for (m <- moduleClass.info.membersBasedOnFlags(ExcludedForwarderFlags, Flags.METHOD)) {
         if (m.isType || m.isDeferred || (m.owner eq ObjectClass) || m.isConstructor)
           debuglog("No forwarder for '%s' from %s to '%s'".format(m, jclassName, moduleClass))
-        else if (conflictingNames(m.name))
+        else if (m.isAccessor && isStaticMember(m.accessed)) {
+          log("@static - accessor: " + m + ", accessed: " + m.accessed)
+        } else if (isStaticMember(m)) {
+          log("@static - already generated a forwarder from the companion object method to the static method in the class: " + m)
+        } else if (conflictingNames(m.name))
           log("No forwarder for " + m + " due to conflict with " + linkedClass.info.member(m.name))
         else {
           log("Adding static forwarder for '%s' from %s to '%s'".format(m, jclassName, moduleClass))
