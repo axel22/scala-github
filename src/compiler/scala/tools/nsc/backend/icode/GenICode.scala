@@ -854,9 +854,23 @@ abstract class GenICode extends SubComponent  {
           generatedType = toTypeKind(fun.symbol.tpe.resultType)
           ctx1
 
+        case app @ Apply(fun @ Select(qual, _), args)
+        if !ctx.method.symbol.isStaticConstructor 
+        && fun.symbol.isAccessor && fun.symbol.accessed.hasAnnotation(definitions.StaticClass) =>
+          // bypass the accessor to the companion object and load the static field directly
+          // the only place were this bypass is not done, is the static intializer for the static field itself
+          log("context for the apply: " + ctx + ", " + fun.symbol.owner + ", " + ctx.method.symbol.isStaticConstructor)
+          val sym = fun.symbol
+          generatedType = toTypeKind(sym.accessed.info)
+          val hostClass = qual.tpe.typeSymbol.orElse(sym.owner).companionClass
+          val staticfield = hostClass.info.decls.find(_.name.toString.trim == sym.name.toString.trim)
+          
+          ctx.bb.emit(LOAD_FIELD(staticfield.get, true) setHostClass hostClass, tree.pos)
+          ctx
+        
         case app @ Apply(fun, args) =>
           val sym = fun.symbol
-
+          
           if (sym.isLabel) {  // jump to a label
             val label = ctx.labels.getOrElse(sym, {
               // it is a forward jump, scan for labels
@@ -910,7 +924,6 @@ abstract class GenICode extends SubComponent  {
              */
             fun match {
               case Select(qual, _) =>
-                log("failing here: " + fun)
                 val qualSym = qual.tpe.typeSymbol
                 if (qualSym == ArrayClass) cm setTargetTypeKind toTypeKind(qual.tpe)
                 else cm setHostClass qualSym

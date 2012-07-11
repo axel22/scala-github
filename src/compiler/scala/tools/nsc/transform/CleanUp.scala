@@ -69,20 +69,14 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
           log("found field with @static: " + stfieldSym)
           
           val rhs = staticBodies((currentClass, stfieldSym))
-          val stfieldDef  = localTyper.typedPos(tree.pos)(VAL(stfieldSym) === rhs)
+          log("typechecking: " + (VAL(stfieldSym) === EmptyTree))
+          val stfieldDef  = localTyper.typedPos(tree.pos)(VAL(stfieldSym) === EmptyTree)
+          log("typechecking: " + (safeREF(stfieldSym) === rhs))
           val stfieldInit = localTyper.typedPos(tree.pos)(safeREF(stfieldSym) === rhs)
           
           // add field definition to new defs
           newStaticMembers append stfieldDef
           newStaticInits append stfieldInit
-        case stmethSym if stmethSym.isMethod =>
-          log("found field with @static: " + stmethSym)
-          
-          val rhs = staticBodies((currentClass, stmethSym))
-          val stmethDef  = localTyper.typedPos(tree.pos)(DEF(stmethSym) === rhs)
-          
-          // add method definition to new defs
-          newStaticMembers append stmethDef
       }
     }
     
@@ -588,29 +582,6 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
           else tree
         }
       
-      case DefDef(mods, name, tparams, vparamss, tpt, rhs) if tree.symbol.hasAnnotation(StaticClass) =>
-        log("--> cleanup static defdef: " + name)
-        val sym = tree.symbol
-        val owner = sym.owner
-        
-        if (owner.isModuleClass) {
-          val linkedClass = owner.companionClass
-          log("companion: " + linkedClass + ", " + linkedClass.fullName + " -> @static val " + name)
-          
-          val stmethSym = linkedClass.newMethod(newTermName(name.toTermName), tree.pos, STATIC | SYNTHETIC | FINAL)
-          stmethSym setInfo sym.info
-          stmethSym.addAnnotation(StaticClass)
-          
-          linkedClass.info.decls enter stmethSym
-          staticBodies((linkedClass, stmethSym)) = rhs
-          
-          // generate a forwarder to the static method in `Foo`
-          val forwtree = Apply(Select(This(linkedClass), stmethSym), vparamss(0))
-          val ntree = localTyper.typedPos(tree.pos)(DefDef(sym, forwtree))
-          
-          super.transform(ntree)
-        } else super.transform(tree)
-      
       case ValDef(mods, name, tpt, rhs) if tree.symbol.hasAnnotation(StaticClass) =>
         log("--> cleanup static valdef: " + name)
         val sym = tree.symbol
@@ -618,13 +589,13 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
         
         if (owner.isModuleClass) {
           val linkedClass = owner.companionClass
-          log("companion: " + linkedClass + ", " + linkedClass.fullName + " -> @static val " + name)
+          log("companion: " + linkedClass + ", " + linkedClass.fullName + " -> @static val '" + name + "'")
           
           val stfieldSym = linkedClass.newVariable(newTermName(name), tree.pos, STATIC | SYNTHETIC | FINAL) setInfo sym.tpe
           stfieldSym.addAnnotation(StaticClass)
           
           linkedClass.info.decls enter stfieldSym
-          staticBodies((linkedClass, stfieldSym)) = Select(This(owner), sym)
+          staticBodies((linkedClass, stfieldSym)) = Select(This(owner), sym.getter(owner))
         }
         
         super.transform(tree)
