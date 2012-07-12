@@ -27,6 +27,7 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
     private val newStaticInits        = mutable.Buffer.empty[Tree]
     private val symbolsStoredAsStatic = mutable.Map.empty[String, Symbol]
     private val staticBodies          = mutable.Map.empty[(Symbol, Symbol), Tree]
+    private val syntheticClasses      = mutable.Map.empty[Symbol, mutable.Set[Tree]] // package and trees
     private def clearStatics() {
       newStaticMembers.clear()
       newStaticInits.clear()
@@ -49,36 +50,12 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
       val t @ Template(parents, self, body) = tree
       clearStatics()
       
-      addStaticDeclarations(t)
-      
       val newBody = transformTrees(body)
       val templ   = deriveTemplate(tree)(_ => transformTrees(newStaticMembers.toList) ::: newBody)
       try addStaticInits(templ) // postprocess to include static ctors
       finally clearStatics()
     }
     private def mkTerm(prefix: String): TermName = unit.freshTermName(prefix)
-    
-    private def addStaticDeclarations(tree: Template) {
-      log("cleanup template: " + currentClass)
-      
-      if (!currentClass.isModuleClass) for {
-        staticSym <- currentClass.info.decls
-        if staticSym.hasAnnotation(StaticClass)
-      } staticSym match {
-        case stfieldSym if stfieldSym.isVariable =>
-          log("found field with @static: " + stfieldSym)
-          
-          val rhs = staticBodies((currentClass, stfieldSym))
-          log("typechecking: " + (VAL(stfieldSym) === EmptyTree))
-          val stfieldDef  = localTyper.typedPos(tree.pos)(VAL(stfieldSym) === EmptyTree)
-          log("typechecking: " + (safeREF(stfieldSym) === rhs))
-          val stfieldInit = localTyper.typedPos(tree.pos)(safeREF(stfieldSym) === rhs)
-          
-          // add field definition to new defs
-          newStaticMembers append stfieldDef
-          newStaticInits append stfieldInit
-      }
-    }
     
     /** Kludge to provide a safe fix for #4560:
      *  If we generate a reference in an implementation class, we
@@ -588,7 +565,27 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
         val owner = sym.owner
         
         if (owner.isModuleClass) {
-          val linkedClass = owner.companionClass
+          val linkedClass = owner.companionClass match {
+            case NoSymbol =>
+              // create the companion class
+              log("Hello!! We've got no friend, owner.typename: " + owner.name.toTypeName)
+              
+              val enclosing = owner.owner
+              val compclass = enclosing.newClass(newTypeName(owner.name.toString))
+              compclass setInfo ClassInfoType(List(ObjectClass.tpe), newScope, compclass)
+              enclosing.info.decls enter compclass
+              
+              val compclstree = ClassDef(compclass, NoMods, List(List()), List(List()), List(), tree.pos)
+              log("enclosing: " + owner.owner)
+              log("created class symbol: " + compclass)
+              log("class info: " + compclass.info)
+              log("created class tree: " + compclstree + " at " + tree.pos)
+              
+              syntheticClasses.getOrElseUpdate(enclosing, mutable.Set()) += compclstree
+              
+              compclass
+            case comp => comp
+          }
           log("companion: " + linkedClass + ", " + linkedClass.fullName + " -> @static val '" + name + "'")
           
           val stfieldSym = linkedClass.newVariable(newTermName(name), tree.pos, STATIC | SYNTHETIC | FINAL) setInfo sym.tpe
@@ -732,7 +729,62 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
         deriveTemplate(template)(newCtor :: _)
       }
     }
-
+    
+    private def addStaticDeclarations(tree: Template, clazz: Symbol) {
+      log("cleanup template: " + clazz)
+      log("it's companion class: " + clazz.companionClass)
+      log("it's companion module: " + clazz.companionModule)
+      log("it's companion: " + clazz.companionModule)
+      
+      if (!clazz.isModuleClass) for {
+        staticSym <- clazz.info.decls
+        if staticSym.hasAnnotation(StaticClass)
+      } staticSym match {
+        case stfieldSym if stfieldSym.isVariable =>
+          log("found field with @static: " + stfieldSym)
+          
+          val rhs = staticBodies((clazz, stfieldSym))
+          log("typechecking: " + (VAL(stfieldSym) === EmptyTree))
+          val stfieldDef  = localTyper.typedPos(tree.pos)(VAL(stfieldSym) === EmptyTree)
+          log("typechecking: " + (safeREF(stfieldSym) === rhs))
+          val stfieldInit = localTyper.typedPos(tree.pos)(safeREF(stfieldSym) === rhs)
+          
+          // add field definition to new defs
+          newStaticMembers append stfieldDef
+          newStaticInits append stfieldInit
+      }
+    }
+    
+    
+    
+    override def transformStats(stats: List[Tree], exprOwner: Symbol): List[Tree] = {
+      super.transformStats(stats, exprOwner) ++ {
+        // flush pending synthetic classes created in this owner
+        val synthclassdefs = syntheticClasses.get(exprOwner).toList.flatten
+        syntheticClasses -= exprOwner
+        synthclassdefs map {
+          cdef => localTyper.typedPos(cdef.pos)(cdef)
+        }
+      } map {
+        case clsdef @ ClassDef(mods, name, tparams, t @ Template(parent, self, body)) =>
+          log("owner here: " + exprOwner)
+          log("postprocessing class: " + clsdef.symbol)
+          clearStatics()
+          
+          addStaticDeclarations(t, clsdef.symbol)
+          
+          val templ  = deriveTemplate(t)(_ => transformTrees(newStaticMembers.toList) ::: body)
+          val ntempl =
+            try addStaticInits(templ)
+            finally clearStatics()
+          
+          val derived = deriveClassDef(clsdef)(_ => ntempl)
+          derived
+          
+        case stat => stat
+      }
+    }
+    
   } // CleanUpTransformer
 
 }

@@ -104,6 +104,8 @@ abstract class GenICode extends SubComponent  {
         debuglog("Entering method " + name)
         val m = new IMethod(tree.symbol)
         m.sourceFile = unit.source
+        log("method: " + name + ", tree symbol: " + tree.symbol)
+        log("tree symbol info: " + tree.symbol.info)
         m.returnType = if (tree.symbol.isConstructor) UNIT
                        else toTypeKind(tree.symbol.info.resultType)
         ctx.clazz.addMethod(m)
