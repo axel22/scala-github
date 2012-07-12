@@ -187,7 +187,7 @@ abstract class Constructors extends Transform with ast.TreeDSL {
           // Lazy vals don't get the assignment in the constructor.
           if (!stat.symbol.tpe.isInstanceOf[ConstantType]) {
             if (stat.symbol.hasStaticAnnotation) {
-              log("@static annotated field initialization skipped.")
+              debuglog("@static annotated field initialization skipped.")
               defBuf += deriveValDef(stat)(tree => tree)
             } else if (rhs != EmptyTree && !stat.symbol.isLazy) {
               val rhs1 = intoConstructor(stat.symbol, rhs);

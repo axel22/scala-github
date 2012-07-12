@@ -561,13 +561,12 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
         }
       
       case ValDef(mods, name, tpt, rhs) if tree.symbol.hasStaticAnnotation =>
-        log("--> cleanup static valdef: " + name + ", in: " + tree.symbol.owner)
+        log("moving @static valdef field: " + name + ", in: " + tree.symbol.owner)
         val sym = tree.symbol
         val owner = sym.owner
         
         val staticBeforeLifting = atPhase(currentRun.erasurePhase) { owner.isStatic }
         if (!owner.isModuleClass || !staticBeforeLifting) {
-          log("not a module class: " + owner)
           if (!sym.isSynthetic) {
             reporter.error(tree.pos, "Only members of top-level objects and their nested objects can be annotated with @static.")
             tree.symbol.removeAnnotation(StaticClass)
@@ -576,34 +575,27 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
         } else if (owner.isModuleClass) {
           val linkedClass = owner.companionClass match {
             case NoSymbol =>
-              // create the companion class
-              log("Hello!! We've got no friend, owner.typename: " + owner.name.toTypeName)
-              
+              // create the companion class if it does not exist
               val enclosing = owner.owner
               val compclass = enclosing.newClass(newTypeName(owner.name.toString))
               compclass setInfo ClassInfoType(List(ObjectClass.tpe), newScope, compclass)
               enclosing.info.decls enter compclass
               
               val compclstree = ClassDef(compclass, NoMods, List(List()), List(List()), List(), tree.pos)
-              log("enclosing: " + owner.owner)
-              log("created class symbol: " + compclass)
-              log("class info: " + compclass.info)
-              log("created class tree: " + compclstree + " at " + tree.pos)
               
               syntheticClasses.getOrElseUpdate(enclosing, mutable.Set()) += compclstree
               
               compclass
             case comp => comp
           }
-          log("companion: " + linkedClass + ", " + linkedClass.fullName + " -> @static val '" + name + "'")
           
+          // create a static field in the companion class for this @static field
           val stfieldSym = linkedClass.newVariable(newTermName(name), tree.pos, STATIC | SYNTHETIC | FINAL) setInfo sym.tpe
           stfieldSym.addAnnotation(StaticClass)
           
           val names = classNames.getOrElseUpdate(linkedClass, linkedClass.info.decls.collect {
             case sym if sym.name.isTermName => sym.name
           } toSet)
-          log("names in " + linkedClass + ": " + names)
           if (names(stfieldSym.name)) {
             reporter.error(
               tree.pos,
@@ -762,18 +754,12 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
     }
     
     private def addStaticDeclarations(tree: Template, clazz: Symbol) {
-      log("cleanup template: " + clazz)
-      log("it's companion class: " + clazz.companionClass)
-      log("it's companion module: " + clazz.companionModule)
-      log("it's companion: " + clazz.companionModule)
-      
+      // add static field initializer statements for each static field in clazz
       if (!clazz.isModuleClass) for {
         staticSym <- clazz.info.decls
         if staticSym.hasStaticAnnotation
       } staticSym match {
         case stfieldSym if stfieldSym.isVariable =>
-          log("found field with @static: " + stfieldSym)
-          
           val valdef = staticBodies((clazz, stfieldSym))
           val ValDef(_, _, _, rhs) = valdef
           val fixedrhs = rhs.changeOwner((valdef.symbol, clazz.info.decl(nme.CONSTRUCTOR)))
@@ -783,7 +769,6 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
             case Block(stats, expr) => Block(stats, safeREF(stfieldSym) === expr)
             case rhs => safeREF(stfieldSym) === rhs
           }
-          log("typechecking: " + (flattenedInit) + ", " + rhs.getClass)
           val stfieldInit = localTyper.typedPos(tree.pos)(flattenedInit)
           
           // add field definition to new defs
@@ -804,8 +789,7 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
         }
       } map {
         case clsdef @ ClassDef(mods, name, tparams, t @ Template(parent, self, body)) =>
-          log("owner here: " + exprOwner)
-          log("postprocessing class: " + clsdef.symbol)
+          // process all classes in the package again to add static initializers
           clearStatics()
           
           addStaticDeclarations(t, clsdef.symbol)

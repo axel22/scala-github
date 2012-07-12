@@ -162,6 +162,26 @@ object Test6 extends Check {
 
 
 
+/* TEST 7 */
+
+/** Here we test objects nested in top-level objects */
+object Foo7 {
+  object AndHisFriend {
+    @static val field = "string"
+  }
+  class AndHisFriend
+}
+
+
+object Test7 extends Check {
+  def test() {
+    checkStatic(classOf[Foo7.AndHisFriend])
+    assert(Foo7.AndHisFriend == "string")
+  }
+}
+
+
+
 /* main */
 
 object Test {

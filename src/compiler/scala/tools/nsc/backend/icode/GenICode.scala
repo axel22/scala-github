@@ -104,8 +104,6 @@ abstract class GenICode extends SubComponent  {
         debuglog("Entering method " + name)
         val m = new IMethod(tree.symbol)
         m.sourceFile = unit.source
-        log("method: " + name + ", tree symbol: " + tree.symbol + ", in: " + tree.symbol.owner)
-        log("tree symbol info: " + tree.symbol.info)
         m.returnType = if (tree.symbol.isConstructor) UNIT
                        else toTypeKind(tree.symbol.info.resultType)
         ctx.clazz.addMethod(m)
@@ -116,9 +114,7 @@ abstract class GenICode extends SubComponent  {
 
         if (!m.isAbstractMethod && !m.native) {
           if (m.symbol.isAccessor && m.symbol.accessed.hasStaticAnnotation) {
-            log("wonderland")
-            log("context for the apply: " + ctx1 + ", " + m.symbol.owner + ", " + ctx1.method.symbol.isStaticConstructor)
-            //val tp = toTypeKind(m.symbol.accessed.info)
+            // in companion object accessors to @static fields, we access the static field directly
             val hostClass = m.symbol.owner.companionClass
             val staticfield = hostClass.info.decls.find(_.name.toString.trim == m.symbol.accessed.name.toString.trim)
             
@@ -129,7 +125,7 @@ abstract class GenICode extends SubComponent  {
               ctx1.bb.emit(LOAD_LOCAL(m.locals.head), tree.pos)
               ctx1.bb.emit(STORE_FIELD(staticfield.get, true), tree.pos)
               ctx1.bb.closeWith(RETURN(m.returnType))
-            } else assert(false, "supposedly unreachable")
+            } else assert(false, "unreachable")
           } else {
             ctx1 = genLoad(rhs, ctx1, m.returnType);
 
@@ -879,7 +875,6 @@ abstract class GenICode extends SubComponent  {
         && fun.symbol.isAccessor && fun.symbol.accessed.hasStaticAnnotation =>
           // bypass the accessor to the companion object and load the static field directly
           // the only place were this bypass is not done, is the static intializer for the static field itself
-          log("context for the apply: " + ctx + ", " + fun.symbol.owner + ", " + ctx.method.symbol.isStaticConstructor)
           val sym = fun.symbol
           generatedType = toTypeKind(sym.accessed.info)
           val hostClass = qual.tpe.typeSymbol.orElse(sym.owner).companionClass
