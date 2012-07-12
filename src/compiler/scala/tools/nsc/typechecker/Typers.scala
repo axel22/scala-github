@@ -47,7 +47,6 @@ trait Typers extends Modes with Adaptations with Tags {
   def resetTyper() {
     //println("resetTyper called")
     resetContexts()
-    resetNamer()
     resetImplicits()
     transformed.clear()
   }
@@ -1380,7 +1379,7 @@ trait Typers extends Modes with Adaptations with Tags {
             for (stat <- body)
               if (!treeInfo.isAllowedInUniversalTrait(stat) && !isUnderlyingAcc(stat.symbol))
                 unit.error(stat.pos,
-                  if (stat.symbol hasFlag PARAMACCESSOR) "illegal parameter for value class"
+                  if (stat.symbol != null && (stat.symbol hasFlag PARAMACCESSOR)) "illegal parameter for value class"
                   else "this statement is not allowed in value class: " + stat)
           case x =>
             unit.error(clazz.pos, "value class needs to have exactly one public val parameter")
@@ -5114,7 +5113,7 @@ trait Typers extends Modes with Adaptations with Tags {
 
         case SelectFromTypeTree(qual, selector) =>
           val qual1 = typedType(qual, mode)
-          if (qual1.tpe.isVolatile) TypeSelectionFromVolatileTypeError(tree, qual)
+          if (qual1.tpe.isVolatile) TypeSelectionFromVolatileTypeError(tree, qual1)
           else typedSelect(qual1, selector)
 
         case CompoundTypeTree(templ) =>

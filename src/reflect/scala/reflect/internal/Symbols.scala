@@ -10,6 +10,7 @@ import scala.collection.{ mutable, immutable }
 import scala.collection.mutable.ListBuffer
 import util.Statistics
 import Flags._
+import base.Attachments
 
 trait Symbols extends api.Symbols { self: SymbolTable =>
   import definitions._
@@ -363,7 +364,8 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
   abstract class Symbol protected[Symbols] (initOwner: Symbol, initPos: Position, initName: Name)
           extends SymbolContextApiImpl
              with HasFlags
-             with Annotatable[Symbol] {
+             with Annotatable[Symbol]
+             with Attachable {
 
     type AccessBoundaryType = Symbol
     type AnnotationType     = AnnotationInfo
@@ -385,7 +387,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
     def rawowner = _rawowner
     def rawflags = _rawflags
 
-    private var rawpos = initPos
+    rawatt = initPos
 
     val id = nextId() // identity displayed when -uniqid
     //assert(id != 3390, initName)
@@ -398,8 +400,6 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
     def validTo = _validTo
     def validTo_=(x: Period) { _validTo = x}
 
-    def pos = rawpos
-    def setPos(pos: Position): this.type = { this.rawpos = pos; this }
     def setName(name: Name): this.type = { this.name = asNameType(name) ; this }
 
     // Update the surrounding scopes
@@ -958,13 +958,13 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
 
     /** Is this symbol an accessor method for outer? */
     final def isOuterAccessor = {
-      hasFlag(STABLE | SYNTHETIC) &&
+      hasFlag(STABLE | HIDDEN) &&
       originalName == nme.OUTER
     }
 
     /** Is this symbol an accessor method for outer? */
     final def isOuterField = {
-      hasFlag(SYNTHETIC) &&
+      hasFlag(HIDDEN) &&
       originalName == nme.OUTER_LOCAL
     }
 
@@ -1822,6 +1822,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
           setInfo (this.info cloneInfo clone)
           setAnnotations this.annotations
       )
+      this.attachments.all.foreach(clone.addAttachment)
       if (clone.thisSym != clone)
         clone.typeOfThis = (clone.typeOfThis cloneInfo clone)
 
@@ -2239,10 +2240,10 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
       base.info.decl(sname) filter (_.hasAccessorFlag)
     }
 
-    /** Return the accessor method of the first parameter of this class.
+    /** If this is a derived value class, return its unbox method
      *  or NoSymbol if it does not exist.
      */
-    def firstParamAccessor: Symbol = NoSymbol
+    def derivedValueClassUnbox: Symbol = NoSymbol
 
      /** The case module corresponding to this case class
      *  @pre case class is a member of some other class or package
@@ -3146,8 +3147,10 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
       clone
     }
 
-    override def firstParamAccessor =
-      info.decls.find(_ hasAllFlags PARAMACCESSOR | METHOD) getOrElse NoSymbol
+    override def derivedValueClassUnbox =
+      (info.decl(nme.unbox)) orElse
+      (info.decls.find(_ hasAllFlags PARAMACCESSOR | METHOD) getOrElse
+       NoSymbol)
 
     private[this] var childSet: Set[Symbol] = Set()
     override def children = childSet
