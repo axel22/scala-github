@@ -142,6 +142,26 @@ object Test5 extends Check {
 }
 
 
+/* TEST 6 */
+
+/** Here we test flattening the static ctor body and changing the owners of local definitions. */
+object Foo6 {
+  var companionField = 101
+  @static val staticField = {
+    val intermediate = companionField + 1
+    intermediate * 2
+  }
+}
+
+
+object Test6 extends Check {
+  def test() {
+    assert(Foo6.staticField == 204)
+  }
+}
+
+
+
 /* main */
 
 object Test {
@@ -152,6 +172,7 @@ object Test {
     Test3.test()
     Test4.test()
     Test5.test()
+    Test6.test()
   }
   
 }

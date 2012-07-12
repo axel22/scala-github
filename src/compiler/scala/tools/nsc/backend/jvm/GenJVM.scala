@@ -1028,6 +1028,8 @@ abstract class GenJVM extends SubComponent with GenJVMUtil with GenAndroid with 
 
        	  method = m
        	  jmethod = clinitMethod
+          
+          computeLocalVarsIndex(m)
        	  genCode(m)
        	case None =>
           legacyStaticInitializer(cls, clinit)
@@ -1396,6 +1398,8 @@ abstract class GenJVM extends SubComponent with GenJVMUtil with GenAndroid with 
               }
 
             case STORE_LOCAL(local) =>
+              log("---> storing local: " + local)
+              log("owners: " + local.sym.ownerChain)
               jcode.emitSTORE(indexOf(local), javaType(local.kind))
 
             case STORE_THIS(_) =>
@@ -1894,15 +1898,17 @@ abstract class GenJVM extends SubComponent with GenJVMUtil with GenAndroid with 
      */
     def computeLocalVarsIndex(m: IMethod) {
       var idx = if (m.symbol.isStaticMember) 0 else 1;
-
+      log("computing local vars indices: " + m + ", " + m.symbol)
+      log("owners: " + m.symbol.ownerChain)
+      
       for (l <- m.params) {
-        debuglog("Index value for " + l + "{" + l.## + "}: " + idx)
+        log("Index value for " + l + "{" + l.## + "}: " + idx)
         l.index = idx
         idx += sizeOf(l.kind)
       }
 
       for (l <- m.locals if !(m.params contains l)) {
-        debuglog("Index value for " + l + "{" + l.## + "}: " + idx)
+        log("Index value for " + l + "{" + l.## + "}: " + idx)
         l.index = idx
         idx += sizeOf(l.kind)
       }

@@ -593,10 +593,13 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
           
           linkedClass.info.decls enter stfieldSym
           
+          val initializerBody = rhs
+          
           // static field was previously initialized in the companion object itself, like this:
           //   staticBodies((linkedClass, stfieldSym)) = Select(This(owner), sym.getter(owner))
           // instead, we move the initializer to the static ctor of the companion class
-          staticBodies((linkedClass, stfieldSym)) = rhs
+          // we save the ValDef/DefDef
+          staticBodies((linkedClass, stfieldSym)) = tree
         }
         
         super.transform(tree)
@@ -710,6 +713,11 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
       if (newStaticInits.isEmpty)
         template
       else {
+        val ctorBody = newStaticInits.toList flatMap {
+          case Block(stats, expr) => stats :+ expr
+          case t => List(t)
+        }
+        
         val newCtor = findStaticCtor(template) match {
           // in case there already were static ctors - augment existing ones
           // currently, however, static ctors aren't being generated anywhere else
@@ -718,15 +726,15 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
             deriveDefDef(ctor) {
               case block @ Block(stats, expr) =>
                 // need to add inits to existing block
-                treeCopy.Block(block, newStaticInits.toList ::: stats, expr)
+                treeCopy.Block(block, ctorBody ::: stats, expr)
               case term: TermTree =>
                 // need to create a new block with inits and the old term
-                treeCopy.Block(term, newStaticInits.toList, term)
+                treeCopy.Block(term, ctorBody, term)
             }
           case _ =>
             // create new static ctor
             val staticCtorSym  = currentClass.newStaticConstructor(template.pos)
-            val rhs            = Block(newStaticInits.toList, Literal(Constant(())))
+            val rhs            = Block(ctorBody, Literal(Constant(())))
 
             localTyper.typedPos(template.pos)(DefDef(staticCtorSym, rhs))
         }
@@ -747,11 +755,17 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
         case stfieldSym if stfieldSym.isVariable =>
           log("found field with @static: " + stfieldSym)
           
-          val rhs = staticBodies((clazz, stfieldSym))
-          log("typechecking: " + (VAL(stfieldSym) === EmptyTree))
+          val valdef = staticBodies((clazz, stfieldSym))
+          val ValDef(_, _, _, rhs) = valdef
+          val fixedrhs = rhs.changeOwner((valdef.symbol, clazz.info.decl(nme.CONSTRUCTOR)))
+          
           val stfieldDef  = localTyper.typedPos(tree.pos)(VAL(stfieldSym) === EmptyTree)
-          log("typechecking: " + (safeREF(stfieldSym) === rhs))
-          val stfieldInit = localTyper.typedPos(tree.pos)(safeREF(stfieldSym) === rhs)
+          val flattenedInit = fixedrhs match {
+            case Block(stats, expr) => Block(stats, safeREF(stfieldSym) === expr)
+            case rhs => safeREF(stfieldSym) === rhs
+          }
+          log("typechecking: " + (flattenedInit) + ", " + rhs.getClass)
+          val stfieldInit = localTyper.typedPos(tree.pos)(flattenedInit)
           
           // add field definition to new defs
           newStaticMembers append stfieldDef
