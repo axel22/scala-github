@@ -1122,8 +1122,6 @@ abstract class GenJVM extends SubComponent with GenJVMUtil with GenAndroid with 
       }
       debuglog("Potentially conflicting names for forwarders: " + conflictingNames)
       
-      def isStaticMember(m: Symbol) = m.hasAnnotation(definitions.StaticClass)
-
       for (m <- moduleClass.info.membersBasedOnFlags(ExcludedForwarderFlags, Flags.METHOD)) {
         if (m.isType || m.isDeferred || (m.owner eq ObjectClass) || m.isConstructor)
           debuglog("No forwarder for '%s' from %s to '%s'".format(m, className, moduleClass))
@@ -1131,7 +1129,7 @@ abstract class GenJVM extends SubComponent with GenJVMUtil with GenAndroid with 
           log("No forwarder for " + m + " due to conflict with " + linkedClass.info.member(m.name))
         else {
           log("Adding static forwarder for '%s' from %s to '%s'".format(m, className, moduleClass))
-          if (m.isAccessor && isStaticMember(m.accessed)) {
+          if (m.isAccessor && m.accessed.hasStaticAnnotation) {
             log("@static: accessor " + m + ", accessed: " + m.accessed)
           } else addForwarder(jclass, moduleClass, m)
         }

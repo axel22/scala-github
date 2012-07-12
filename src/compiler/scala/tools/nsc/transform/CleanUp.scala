@@ -559,7 +559,7 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
           else tree
         }
       
-      case ValDef(mods, name, tpt, rhs) if tree.symbol.hasAnnotation(StaticClass) =>
+      case ValDef(mods, name, tpt, rhs) if tree.symbol.hasStaticAnnotation =>
         log("--> cleanup static valdef: " + name)
         val sym = tree.symbol
         val owner = sym.owner
@@ -592,7 +592,11 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
           stfieldSym.addAnnotation(StaticClass)
           
           linkedClass.info.decls enter stfieldSym
-          staticBodies((linkedClass, stfieldSym)) = Select(This(owner), sym.getter(owner))
+          
+          // static field was previously initialized in the companion object itself, like this:
+          //   staticBodies((linkedClass, stfieldSym)) = Select(This(owner), sym.getter(owner))
+          // instead, we move the initializer to the static ctor of the companion class
+          staticBodies((linkedClass, stfieldSym)) = rhs
         }
         
         super.transform(tree)
@@ -738,7 +742,7 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
       
       if (!clazz.isModuleClass) for {
         staticSym <- clazz.info.decls
-        if staticSym.hasAnnotation(StaticClass)
+        if staticSym.hasStaticAnnotation
       } staticSym match {
         case stfieldSym if stfieldSym.isVariable =>
           log("found field with @static: " + stfieldSym)
