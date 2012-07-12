@@ -23,11 +23,12 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
     new CleanUpTransformer(unit)
 
   class CleanUpTransformer(unit: CompilationUnit) extends Transformer {
-    private val newStaticMembers      = mutable.Buffer.empty[Tree]
-    private val newStaticInits        = mutable.Buffer.empty[Tree]
-    private val symbolsStoredAsStatic = mutable.Map.empty[String, Symbol]
-    private val staticBodies          = mutable.Map.empty[(Symbol, Symbol), Tree]
-    private val syntheticClasses      = mutable.Map.empty[Symbol, mutable.Set[Tree]] // package and trees
+    private val newStaticMembers       = mutable.Buffer.empty[Tree]
+    private val newStaticInits         = mutable.Buffer.empty[Tree]
+    private val symbolsStoredAsStatic  = mutable.Map.empty[String, Symbol]
+    private val staticBodies           = mutable.Map.empty[(Symbol, Symbol), Tree]
+    private val syntheticClasses       = mutable.Map.empty[Symbol, mutable.Set[Tree]] // package and trees
+    private val classNames             = mutable.Map.empty[Symbol, Set[Name]]
     private def clearStatics() {
       newStaticMembers.clear()
       newStaticInits.clear()
@@ -560,11 +561,19 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
         }
       
       case ValDef(mods, name, tpt, rhs) if tree.symbol.hasStaticAnnotation =>
-        log("--> cleanup static valdef: " + name)
+        log("--> cleanup static valdef: " + name + ", in: " + tree.symbol.owner)
         val sym = tree.symbol
         val owner = sym.owner
         
-        if (owner.isModuleClass) {
+        val staticBeforeLifting = atPhase(currentRun.erasurePhase) { owner.isStatic }
+        if (!owner.isModuleClass || !staticBeforeLifting) {
+          log("not a module class: " + owner)
+          if (!sym.isSynthetic) {
+            reporter.error(tree.pos, "Only members of top-level objects and their nested objects can be annotated with @static.")
+            tree.symbol.removeAnnotation(StaticClass)
+          }
+          super.transform(tree)
+        } else if (owner.isModuleClass) {
           val linkedClass = owner.companionClass match {
             case NoSymbol =>
               // create the companion class
@@ -591,17 +600,27 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
           val stfieldSym = linkedClass.newVariable(newTermName(name), tree.pos, STATIC | SYNTHETIC | FINAL) setInfo sym.tpe
           stfieldSym.addAnnotation(StaticClass)
           
-          linkedClass.info.decls enter stfieldSym
-          
-          val initializerBody = rhs
-          
-          // static field was previously initialized in the companion object itself, like this:
-          //   staticBodies((linkedClass, stfieldSym)) = Select(This(owner), sym.getter(owner))
-          // instead, we move the initializer to the static ctor of the companion class
-          // we save the ValDef/DefDef
-          staticBodies((linkedClass, stfieldSym)) = tree
+          val names = classNames.getOrElseUpdate(linkedClass, linkedClass.info.decls.collect {
+            case sym if sym.name.isTermName => sym.name
+          } toSet)
+          log("names in " + linkedClass + ": " + names)
+          if (names(stfieldSym.name)) {
+            reporter.error(
+              tree.pos,
+              "@static annotated field " + tree.symbol.name + " has the same name as a member of class " + linkedClass.name
+            )
+          } else {
+            linkedClass.info.decls enter stfieldSym
+            
+            val initializerBody = rhs
+            
+            // static field was previously initialized in the companion object itself, like this:
+            //   staticBodies((linkedClass, stfieldSym)) = Select(This(owner), sym.getter(owner))
+            // instead, we move the initializer to the static ctor of the companion class
+            // we save the entire ValDef/DefDef to extract the rhs later
+            staticBodies((linkedClass, stfieldSym)) = tree
+          }
         }
-        
         super.transform(tree)
         
       /* MSIL requires that the stack is empty at the end of a try-block.
@@ -797,6 +816,7 @@ abstract class CleanUp extends Transform with ast.TreeDSL {
             finally clearStatics()
           
           val derived = deriveClassDef(clsdef)(_ => ntempl)
+          classNames.remove(clsdef.symbol)
           derived
           
         case stat => stat
