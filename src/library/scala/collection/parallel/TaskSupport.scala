@@ -24,10 +24,6 @@ import scala.concurrent.ExecutionContext
  *  parallel collection is parametrized with a task support object which is
  *  responsible for scheduling and load-balancing tasks to processors.
  *  
- *  A task support object can be changed in a parallel collection after it has
- *  been created, but only during a quiescent period, i.e. while there are no
- *  concurrent invocations to parallel collection methods.
- *
  *  There are currently a few task support implementations available for
  *  parallel collections. The [[scala.collection.parallel.ForkJoinTaskSupport]]
  *  uses a fork-join pool
@@ -42,15 +38,24 @@ import scala.concurrent.ExecutionContext
  *  default, so parallel collections reuse the same fork-join pool as the
  *  future API.
  *
- *  Here is a way to change the task support of a parallel collection:
+ *  A task support that the parallel collection will use can be changed before
+ *  invoking its parallel operations.
+ *  Here is a way to change the task support that parallel collections will use:
  *
  *  {{{
  *  import scala.collection.parallel._
  *  val pc = mutable.ParArray(1, 2, 3)
- *  pc.tasksupport = new ForkJoinTaskSupport(
+ *  val ts = new ForkJoinTaskSupport(
  *    new scala.concurrent.forkjoin.ForkJoinPool(2))
+ *  
+ *  withTaskSupport(ts) {
+ *    pc.map(_ + 1).filter(_ % 2 != 0).reduce(_ + _)
+ *  }
  *  }}}
- *
+ *  
+ *  Above, every parallel operation within the `withTaskSupport` block will use `ts`
+ *  to scheduler parallel operations.
+ *  
  *  @see [[http://docs.scala-lang.org/overviews/parallel-collections/configuration.html Configuring Parallel Collections]] section
  *    on the parallel collection's guide for more information.
  */

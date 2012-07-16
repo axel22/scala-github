@@ -22,6 +22,7 @@ import scala.collection.parallel.unsupportedop
 import scala.collection.parallel.Combiner
 import scala.collection.parallel.Task
 import scala.reflect.ClassTag
+import scala.collection.parallel.currentTaskSupport
 
 
 
@@ -49,7 +50,7 @@ extends Combiner[T, ParArray[T]] {
     val arrayseq = new ArraySeq[T](size)
     val array = arrayseq.array.asInstanceOf[Array[Any]]
 
-    combinerTaskSupport.executeAndWaitResult(new CopyUnrolledToArray(array, 0, size))
+    currentTaskSupport.get.executeAndWaitResult(new CopyUnrolledToArray(array, 0, size))
 
     new ParArray(arrayseq)
   }
@@ -107,7 +108,7 @@ extends Combiner[T, ParArray[T]] {
       val fp = howmany / 2
       List(new CopyUnrolledToArray(array, offset, fp), new CopyUnrolledToArray(array, offset + fp, howmany - fp))
     }
-    def shouldSplitFurther = howmany > collection.parallel.thresholdFromSize(size, combinerTaskSupport.parallelismLevel)
+    def shouldSplitFurther = howmany > collection.parallel.thresholdFromSize(size, currentTaskSupport.get.parallelismLevel)
     override def toString = "CopyUnrolledToArray(" + offset + ", " + howmany + ")"
   }
 }

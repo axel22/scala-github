@@ -155,15 +155,18 @@ trait AdaptiveWorkStealingTasks extends Tasks {
   trait WrappedTask[R, Tp] extends super.WrappedTask[R, Tp] {
     @volatile var next: WrappedTask[R, Tp] = null
     @volatile var shouldWaitFor = true
+    @volatile var tasksupport: TaskSupport = null
 
     def split: Seq[WrappedTask[R, Tp]]
-
-    def compute() = if (body.shouldSplitFurther) {
-      internal()
-      release()
-    } else {
-      body.tryLeaf(None)
-      release()
+    
+    def compute() = withTaskSupport(tasksupport) {
+      if (body.shouldSplitFurther) {
+        internal()
+        release()
+      } else {
+        body.tryLeaf(None)
+        release()
+      }
     }
 
     def internal() = {
@@ -219,7 +222,7 @@ trait AdaptiveWorkStealingTasks extends Tasks {
   }
 
   // specialize ctor
-  protected def newWrappedTask[R, Tp](b: Task[R, Tp]): WrappedTask[R, Tp]
+  protected def newWrappedTask[R, Tp](b: Task[R, Tp], ts: TaskSupport): WrappedTask[R, Tp]
 
 }
 
@@ -290,7 +293,7 @@ trait ThreadPoolTasks extends Tasks {
     }
   }
 
-  protected def newWrappedTask[R, Tp](b: Task[R, Tp]): WrappedTask[R, Tp]
+  protected def newWrappedTask[R, Tp](b: Task[R, Tp], ts: TaskSupport): WrappedTask[R, Tp]
 
   val environment: ThreadPoolExecutor
   def executor = environment.asInstanceOf[ThreadPoolExecutor]
@@ -306,7 +309,7 @@ trait ThreadPoolTasks extends Tasks {
   }
 
   def execute[R, Tp](task: Task[R, Tp]): () => R = {
-    val t = newWrappedTask(task)
+    val t = newWrappedTask(task, currentTaskSupport.get)
 
     // debuglog("-----------> Executing without wait: " + task)
     t.start()
@@ -319,7 +322,7 @@ trait ThreadPoolTasks extends Tasks {
   }
 
   def executeAndWaitResult[R, Tp](task: Task[R, Tp]): R = {
-    val t = newWrappedTask(task)
+    val t = newWrappedTask(task, currentTaskSupport.get)
 
     // debuglog("-----------> Executing with wait: " + task)
     t.start()
@@ -378,13 +381,13 @@ trait FutureThreadPoolTasks extends Tasks {
     }
   }
 
-  protected def newWrappedTask[R, Tp](b: Task[R, Tp]): WrappedTask[R, Tp]
+  protected def newWrappedTask[R, Tp](b: Task[R, Tp], ts: TaskSupport): WrappedTask[R, Tp]
 
   val environment: AnyRef = FutureThreadPoolTasks.defaultThreadPool
   def executor = environment.asInstanceOf[ThreadPoolExecutor]
 
   def execute[R, Tp](task: Task[R, Tp]): () => R = {
-    val t = newWrappedTask(task)
+    val t = newWrappedTask(task, currentTaskSupport.get)
 
     // debuglog("-----------> Executing without wait: " + task)
     t.start
@@ -397,7 +400,7 @@ trait FutureThreadPoolTasks extends Tasks {
   }
 
   def executeAndWaitResult[R, Tp](task: Task[R, Tp]): R = {
-    val t = newWrappedTask(task)
+    val t = newWrappedTask(task, currentTaskSupport.get)
 
     // debuglog("-----------> Executing with wait: " + task)
     t.start
@@ -446,7 +449,7 @@ trait ForkJoinTasks extends Tasks with HavingForkJoinPool {
   }
 
   // specialize ctor
-  protected def newWrappedTask[R, Tp](b: Task[R, Tp]): WrappedTask[R, Tp]
+  protected def newWrappedTask[R, Tp](b: Task[R, Tp], ts: TaskSupport): WrappedTask[R, Tp]
 
   /** The fork/join pool of this collection.
    */
@@ -458,7 +461,7 @@ trait ForkJoinTasks extends Tasks with HavingForkJoinPool {
    *  $fjdispatch
    */
   def execute[R, Tp](task: Task[R, Tp]): () => R = {
-    val fjtask = newWrappedTask(task)
+    val fjtask = newWrappedTask(task, currentTaskSupport.get)
 
     if (Thread.currentThread.isInstanceOf[ForkJoinWorkerThread]) {
       fjtask.fork
@@ -481,7 +484,7 @@ trait ForkJoinTasks extends Tasks with HavingForkJoinPool {
    *  @return    the result of the task
    */
   def executeAndWaitResult[R, Tp](task: Task[R, Tp]): R = {
-    val fjtask = newWrappedTask(task)
+    val fjtask = newWrappedTask(task, currentTaskSupport.get)
 
     if (Thread.currentThread.isInstanceOf[ForkJoinWorkerThread]) {
       fjtask.fork
@@ -513,10 +516,14 @@ trait AdaptiveWorkStealingForkJoinTasks extends ForkJoinTasks with AdaptiveWorkS
 
   class WrappedTask[R, Tp](val body: Task[R, Tp])
   extends super[ForkJoinTasks].WrappedTask[R, Tp] with super[AdaptiveWorkStealingTasks].WrappedTask[R, Tp] {
-    def split = body.split.map(b => newWrappedTask(b))
+    def split = body.split.map(b => newWrappedTask(b, currentTaskSupport.get))
   }
 
-  def newWrappedTask[R, Tp](b: Task[R, Tp]) = new WrappedTask[R, Tp](b)
+  def newWrappedTask[R, Tp](b: Task[R, Tp], ts: TaskSupport) = {
+    val t = new WrappedTask[R, Tp](b)
+    t.tasksupport = ts
+    t
+  }
 
 }
 
@@ -525,10 +532,14 @@ trait AdaptiveWorkStealingThreadPoolTasks extends ThreadPoolTasks with AdaptiveW
 
   class WrappedTask[R, Tp](val body: Task[R, Tp])
   extends super[ThreadPoolTasks].WrappedTask[R, Tp] with super[AdaptiveWorkStealingTasks].WrappedTask[R, Tp] {
-    def split = body.split.map(b => newWrappedTask(b))
+    def split = body.split.map(b => newWrappedTask(b, currentTaskSupport.get))
   }
 
-  def newWrappedTask[R, Tp](b: Task[R, Tp]) = new WrappedTask[R, Tp](b)
+  def newWrappedTask[R, Tp](b: Task[R, Tp], ts: TaskSupport) = {
+    val t = new WrappedTask[R, Tp](b)
+    t.tasksupport = ts
+    t
+  }
 
 }
 

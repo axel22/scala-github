@@ -17,6 +17,7 @@ import scala.collection.parallel.TaskSupport
 import scala.collection.parallel.unsupportedop
 import scala.collection.parallel.Combiner
 import scala.collection.parallel.Task
+import scala.collection.parallel.currentTaskSupport
 
 
 
@@ -32,7 +33,7 @@ trait ResizableParArrayCombiner[T] extends LazyCombiner[T, ParArray[T], ExposedA
     val arrayseq = new ArraySeq[T](size)
     val array = arrayseq.array.asInstanceOf[Array[Any]]
 
-    combinerTaskSupport.executeAndWaitResult(new CopyChainToArray(array, 0, size))
+    currentTaskSupport.get.executeAndWaitResult(new CopyChainToArray(array, 0, size))
 
     new ParArray(arrayseq)
   } else { // optimisation if there is only 1 array
@@ -81,7 +82,7 @@ trait ResizableParArrayCombiner[T] extends LazyCombiner[T, ParArray[T], ExposedA
       val fp = howmany / 2
       List(new CopyChainToArray(array, offset, fp), new CopyChainToArray(array, offset + fp, howmany - fp))
     }
-    def shouldSplitFurther = howmany > collection.parallel.thresholdFromSize(size, combinerTaskSupport.parallelismLevel)
+    def shouldSplitFurther = howmany > collection.parallel.thresholdFromSize(size, currentTaskSupport.get.parallelismLevel)
   }
 }
 

@@ -49,12 +49,20 @@ package object parallel {
 
   val defaultTaskSupport: TaskSupport = getTaskSupport
   
-  def setTaskSupport[Coll](c: Coll, t: TaskSupport): Coll = {
-    c match {
-      case pc: ParIterableLike[_, _, _] => pc.tasksupport = t
-      case _ => // do nothing
+  private[parallel] val currentTaskSupport = new ThreadLocal[TaskSupport] {
+    override def initialValue = getTaskSupport
+  }
+  
+  def withTaskSupport[T](ts: TaskSupport)(body: =>T) = {
+    var res: T = null.asInstanceOf[T]
+    val old = currentTaskSupport.get
+    try {
+      currentTaskSupport.set(ts)
+      res = body
+    } finally {
+      currentTaskSupport.set(old)
     }
-    c
+    res
   }
   
   /* implicit conversions */

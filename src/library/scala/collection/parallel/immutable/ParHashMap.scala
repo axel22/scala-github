@@ -22,6 +22,7 @@ import scala.collection.generic.GenericParMapCompanion
 import scala.collection.immutable.{ HashMap, TrieIterator }
 import annotation.unchecked.uncheckedVariance
 import collection.parallel.Task
+import scala.collection.parallel.currentTaskSupport
 
 
 
@@ -181,7 +182,7 @@ extends collection.parallel.BucketCombiner[(K, V), ParHashMap[K, V], (K, V), Has
     val bucks = buckets.filter(_ != null).map(_.headPtr)
     val root = new Array[HashMap[K, V]](bucks.length)
 
-    combinerTaskSupport.executeAndWaitResult(new CreateTrie(bucks, root, 0, bucks.length))
+    currentTaskSupport.get.executeAndWaitResult(new CreateTrie(bucks, root, 0, bucks.length))
 
     var bitmap = 0
     var i = 0
@@ -203,7 +204,7 @@ extends collection.parallel.BucketCombiner[(K, V), ParHashMap[K, V], (K, V), Has
     val bucks = buckets.filter(_ != null).map(_.headPtr)
     val root = new Array[HashMap[K, AnyRef]](bucks.length)
     
-    combinerTaskSupport.executeAndWaitResult(new CreateGroupedTrie(cbf, bucks, root, 0, bucks.length))
+    currentTaskSupport.get.executeAndWaitResult(new CreateGroupedTrie(cbf, bucks, root, 0, bucks.length))
 
     var bitmap = 0
     var i = 0
@@ -264,7 +265,7 @@ extends collection.parallel.BucketCombiner[(K, V), ParHashMap[K, V], (K, V), Has
       val fp = howmany / 2
       List(new CreateTrie(bucks, root, offset, fp), new CreateTrie(bucks, root, offset + fp, howmany - fp))
     }
-    def shouldSplitFurther = howmany > collection.parallel.thresholdFromSize(root.length, combinerTaskSupport.parallelismLevel)
+    def shouldSplitFurther = howmany > collection.parallel.thresholdFromSize(root.length, currentTaskSupport.get.parallelismLevel)
   }
 
   class CreateGroupedTrie[Repr](cbf: () => Combiner[V, Repr], bucks: Array[Unrolled[(K, V)]], root: Array[HashMap[K, AnyRef]], offset: Int, howmany: Int)
@@ -328,7 +329,7 @@ extends collection.parallel.BucketCombiner[(K, V), ParHashMap[K, V], (K, V), Has
       val fp = howmany / 2
       List(new CreateGroupedTrie(cbf, bucks, root, offset, fp), new CreateGroupedTrie(cbf, bucks, root, offset + fp, howmany - fp))
     }
-    def shouldSplitFurther = howmany > collection.parallel.thresholdFromSize(root.length, combinerTaskSupport.parallelismLevel)
+    def shouldSplitFurther = howmany > collection.parallel.thresholdFromSize(root.length, currentTaskSupport.get.parallelismLevel)
   }
 
 }

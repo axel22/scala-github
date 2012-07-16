@@ -22,6 +22,7 @@ import scala.collection.generic.GenericParCompanion
 import scala.collection.generic.GenericCompanion
 import scala.collection.immutable.{ HashSet, TrieIterator }
 import collection.parallel.Task
+import scala.collection.parallel.currentTaskSupport
 
 
 
@@ -154,7 +155,7 @@ extends collection.parallel.BucketCombiner[T, ParHashSet[T], Any, HashSetCombine
     val bucks = buckets.filter(_ != null).map(_.headPtr)
     val root = new Array[HashSet[T]](bucks.length)
 
-    combinerTaskSupport.executeAndWaitResult(new CreateTrie(bucks, root, 0, bucks.length))
+    currentTaskSupport.get.executeAndWaitResult(new CreateTrie(bucks, root, 0, bucks.length))
 
     var bitmap = 0
     var i = 0
@@ -209,7 +210,7 @@ extends collection.parallel.BucketCombiner[T, ParHashSet[T], Any, HashSetCombine
       val fp = howmany / 2
       List(new CreateTrie(bucks, root, offset, fp), new CreateTrie(bucks, root, offset + fp, howmany - fp))
     }
-    def shouldSplitFurther = howmany > collection.parallel.thresholdFromSize(root.length, combinerTaskSupport.parallelismLevel)
+    def shouldSplitFurther = howmany > collection.parallel.thresholdFromSize(root.length, currentTaskSupport.get.parallelismLevel)
   }
 }
 

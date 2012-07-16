@@ -146,17 +146,14 @@ self =>
   }
 
   def reverse: Repr = {
-    tasksupport.executeAndWaitResult(new Reverse(() => newCombiner, splitter) mapResult { _.resultWithTaskSupport })
+    tasksupport.executeAndWaitResult(new Reverse(() => newCombiner, splitter) mapResult { _.result })
   }
 
   def reverseMap[S, That](f: T => S)(implicit bf: CanBuildFrom[Repr, S, That]): That = if (bf(repr).isCombiner) {
     tasksupport.executeAndWaitResult(
-      new ReverseMap[S, That](f, () => bf(repr).asCombiner, splitter) mapResult { _.resultWithTaskSupport }
+      new ReverseMap[S, That](f, () => bf(repr).asCombiner, splitter) mapResult { _.result }
     )
-  } else setTaskSupport(seq.reverseMap(f)(bf2seq(bf)), tasksupport)
-  /*bf ifParallel { pbf =>
-    tasksupport.executeAndWaitResult(new ReverseMap[S, That](f, pbf, splitter) mapResult { _.result })
-  } otherwise seq.reverseMap(f)(bf2seq(bf))*/
+  } else seq.reverseMap(f)(bf2seq(bf))
 
   /** Tests whether this $coll contains the given sequence at a given index.
    *
@@ -215,7 +212,7 @@ self =>
       }
       val copyend = new Copy[U, That](cfactory, pits(2))
       tasksupport.executeAndWaitResult(((copystart parallel copymiddle) { _ combine _ } parallel copyend) { _ combine _ } mapResult {
-        _.resultWithTaskSupport
+        _.result
       })
     } else patch_sequential(from, patch.seq, replaced)
   }
@@ -228,19 +225,16 @@ self =>
     b ++= pits(0)
     b ++= patch
     b ++= pits(2)
-    setTaskSupport(b.result, tasksupport)
+    b.result
   }
 
   def updated[U >: T, That](index: Int, elem: U)(implicit bf: CanBuildFrom[Repr, U, That]): That = if (bf(repr).isCombiner) {
     tasksupport.executeAndWaitResult(
       new Updated(index, elem, combinerFactory(() => bf(repr).asCombiner), splitter) mapResult {
-        _.resultWithTaskSupport
+        _.result
       }
     )
-  } else setTaskSupport(seq.updated(index, elem)(bf2seq(bf)), tasksupport)
-  /*bf ifParallel { pbf =>
-    tasksupport.executeAndWaitResult(new Updated(index, elem, pbf, splitter) mapResult { _.result })
-  } otherwise seq.updated(index, elem)(bf2seq(bf))*/
+  } else seq.updated(index, elem)(bf2seq(bf))
 
   def +:[U >: T, That](elem: U)(implicit bf: CanBuildFrom[Repr, U, That]): That = {
     patch(0, mutable.ParArray(elem), 0)
@@ -258,7 +252,7 @@ self =>
     val thatseq = that.asParSeq
     tasksupport.executeAndWaitResult(
       new Zip(length min thatseq.length, combinerFactory(() => bf(repr).asCombiner), splitter, thatseq.splitter) mapResult {
-        _.resultWithTaskSupport
+        _.result
       }
     );
   } else super.zip(that)(bf)

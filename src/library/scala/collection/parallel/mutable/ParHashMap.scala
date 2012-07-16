@@ -181,7 +181,7 @@ extends collection.parallel.BucketCombiner[(K, V), ParHashMap[K, V], DefaultEntr
     // construct table
     val table = new AddingHashTable(size, tableLoadFactor, seedvalue)
     val bucks = buckets.map(b => if (b ne null) b.headPtr else null)
-    val insertcount = combinerTaskSupport.executeAndWaitResult(new FillBlocks(bucks, table, 0, bucks.length))
+    val insertcount = currentTaskSupport.get.executeAndWaitResult(new FillBlocks(bucks, table, 0, bucks.length))
     table.setSize(insertcount)
     // TODO compare insertcount and size to see if compression is needed
     val c = table.hashTableContents
@@ -302,7 +302,7 @@ extends collection.parallel.BucketCombiner[(K, V), ParHashMap[K, V], DefaultEntr
     override def merge(that: FillBlocks) {
       this.result += that.result
     }
-    def shouldSplitFurther = howmany > collection.parallel.thresholdFromSize(ParHashMapCombiner.numblocks, combinerTaskSupport.parallelismLevel)
+    def shouldSplitFurther = howmany > collection.parallel.thresholdFromSize(ParHashMapCombiner.numblocks, currentTaskSupport.get.parallelismLevel)
   }
 
 }
