@@ -120,6 +120,8 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL {
    */
   private def rebindSuper(base: Symbol, member: Symbol, mixinClass: Symbol): Symbol =
     exitingPickler {
+      log("base, member, mixinClass: " + base.fullName + ", " + member.fullName + ", " + mixinClass.fullName)
+      log("base classes: " + base.info.baseClasses)
       var bcs = base.info.baseClasses.dropWhile(mixinClass != _).tail
       var sym: Symbol = NoSymbol
       debuglog("starting rebindsuper " + base + " " + member + ":" + member.tpe +
@@ -336,6 +338,7 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL {
           val superAccessor = addMember(clazz, mixinMember.cloneSymbol(clazz)) setPos clazz.pos
           assert(superAccessor.alias != NoSymbol, superAccessor)
 
+          log("---> rebind super for mixinMember: " + mixinMember.fullName)
           rebindSuper(clazz, mixinMember.alias, mixinClass) match {
             case NoSymbol =>
               unit.error(clazz.pos, "Member %s of mixin %s is missing a concrete super implementation.".format(
