@@ -1443,13 +1443,25 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
           if (sup.symbol.info.parents != enteringPrevPhase(sup.symbol.info.parents)) =>
           def transformSuperApply = {
 
-          def parents = sup.symbol.info.parents
-          debuglog(tree + " parents changed from: " + enteringPrevPhase(parents) + " to: " + parents)
+            def parents = sup.symbol.info.parents
+            debuglog(tree + " parents changed from: " + enteringPrevPhase(parents) + " to: " + parents)
 
-          val res = localTyper.typed(
-            Apply(Select(Super(qual, name) setPos sup.pos, name1) setPos sel.pos, transformTrees(args)) setPos tree.pos)
-          debuglog("retyping call to super, from: " + symbol + " to " + res.symbol)
-          res
+            // find the specialized name for the super class this superaccessor is referring to
+            val oldparents = enteringPrevPhase(parents)
+            val specparents = parents
+            val specname = oldparents.zip(specparents).find {
+              case (oldparent, _) if oldparent.typeSymbol.name == name => true
+              case _ => false
+            } match {
+              case Some((_, specparent)) => specparent.typeSymbol.name.toTypeName
+              case None => name
+            }
+
+            val res = localTyper.typed(
+              Apply(Select(Super(qual, specname) setPos sup.pos, name1) setPos sel.pos, transformTrees(args)) setPos tree.pos)
+            debuglog("from tree: " + tree + " ------> " + res)
+            debuglog("retyping call to super, from: " + symbol + " to " + res.symbol)
+            res
           }
           transformSuperApply
 
