@@ -118,9 +118,12 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL {
    *  @param member     The symbol statically referred to by the superaccessor in the trait
    *  @param mixinClass The mixin class that produced the superaccessor
    */
-  private def rebindSuper(base: Symbol, member: Symbol, mixinClass: Symbol): Symbol =
+  private def rebindSuper(base: Symbol, member: Symbol, mixinClass: Symbol): Symbol = {
+    log("rebindSuper: " + base + ", " + member.fullName + ", " + mixinClass)
+    val baseBaseClasses = base.info.baseClasses
+    log("base classes: " + baseBaseClasses)
     exitingPickler {
-      var bcs = base.info.baseClasses.dropWhile(mixinClass != _).tail
+      var bcs = baseBaseClasses.dropWhile(mixinClass != _).tail
       var sym: Symbol = NoSymbol
       debuglog("starting rebindsuper " + base + " " + member + ":" + member.tpe +
             " " + mixinClass + " " + base.info.baseClasses + "/" + bcs)
@@ -135,6 +138,7 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL {
       }
       sym
     }
+  }
 
 // --------- type transformation -----------------------------------------------
 
@@ -289,6 +293,7 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL {
      */
     def mixinTraitMembers(mixinClass: Symbol) {
       // For all members of a trait's interface do:
+      log("mixinClass " + mixinClass + ": " + mixinClass.info.decls)
       for (mixinMember <- mixinClass.info.decls) {
         if (isConcreteAccessor(mixinMember)) {
           if (isOverriddenAccessor(mixinMember, clazz.info.baseClasses))
@@ -336,6 +341,7 @@ abstract class Mixin extends InfoTransform with ast.TreeDSL {
           val superAccessor = addMember(clazz, mixinMember.cloneSymbol(clazz)) setPos clazz.pos
           assert(superAccessor.alias != NoSymbol, superAccessor)
 
+          log("mixin member: " + mixinMember.fullName)
           rebindSuper(clazz, mixinMember.alias, mixinClass) match {
             case NoSymbol =>
               unit.error(clazz.pos, "Member %s of mixin %s is missing a concrete super implementation.".format(

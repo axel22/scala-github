@@ -1178,7 +1178,9 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
         }
         val newScope = newScopeWith(specializeClass(clazz, typeEnv(clazz)) ++ specialOverrides(clazz): _*)
         // If tparams.isEmpty, this is just the ClassInfoType.
-        GenPolyType(tparams, ClassInfoType(parents1, newScope, clazz))
+        val result = GenPolyType(tparams, ClassInfoType(parents1, newScope, clazz))
+        if (sym.toString.contains("C")) log("baseclasses for " + sym + ": " + result.baseClasses)
+        result
       case _ =>
         tpe
     }
@@ -1459,7 +1461,6 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
 
             val res = localTyper.typed(
               Apply(Select(Super(qual, specname) setPos sup.pos, name1) setPos sel.pos, transformTrees(args)) setPos tree.pos)
-            debuglog("from tree: " + tree + " ------> " + res)
             debuglog("retyping call to super, from: " + symbol + " to " + res.symbol)
             res
           }
@@ -1566,6 +1567,8 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
             (new CollectMethodBodies)(tree)
           val parents1 = map2(currentOwner.info.parents, parents)((tpe, parent) =>
             TypeTree(tpe) setPos parent.pos)
+          log("template: " + currentOwner + ", baseClasses: " + currentOwner.info.baseClasses)
+          log("decls: " + currentOwner.info.decls)
 
           treeCopy.Template(tree,
             parents1    /*currentOwner.info.parents.map(tpe => TypeTree(tpe) setPos parents.head.pos)*/ ,
